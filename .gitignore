@@ -1,0 +1,17 @@
+# ANTLR generated artifacts (regenerated from Compiscript.g4, not committed)
+program/CompiscriptLexer.py
+program/CompiscriptParser.py
+program/CompiscriptListener.py
+program/CompiscriptVisitor.py
+program/*.tokens
+program/*.interp
+program/.antlr/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# OS / editor
+.vscode/
+.DS_Store
