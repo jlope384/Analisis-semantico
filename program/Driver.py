@@ -1,10 +1,11 @@
 import sys
 
-from antlr4 import FileStream, CommonTokenStream
+from antlr4 import FileStream, CommonTokenStream, ParseTreeWalker
 from antlr4.error.ErrorListener import ErrorListener
 
 from CompiscriptLexer import CompiscriptLexer
 from CompiscriptParser import CompiscriptParser
+from analyzer import SemanticAnalyzer
 
 
 class SyntaxErrorListener(ErrorListener):
@@ -37,8 +38,13 @@ def main(path: str) -> int:
             print(error)
         return 1
 
-    # TODO: fase de analisis semantico (tabla de simbolos + visitor de reglas)
-    # se conecta aqui una vez implementada.
+    analyzer = SemanticAnalyzer()
+    ParseTreeWalker.DEFAULT.walk(analyzer, tree)
+
+    if analyzer.errors:
+        for error in analyzer.errors:
+            print(error)
+        return 1
 
     return 0
 
