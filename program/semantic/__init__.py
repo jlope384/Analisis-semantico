@@ -31,6 +31,7 @@ from .symbol_table import (
     SymbolTable,
     DuplicateSymbolError,
 )
+from .errors import SemanticError
 
 __all__ = [
     "Type",
@@ -62,4 +63,5 @@ __all__ = [
     "ClassSymbol",
     "SymbolTable",
     "DuplicateSymbolError",
+    "SemanticError",
 ]
