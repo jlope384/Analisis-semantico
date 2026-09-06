@@ -137,3 +137,22 @@ def is_numeric(t: Type) -> bool:
 
 def is_error(t: Type) -> bool:
     return isinstance(t, ErrorType)
+
+
+def is_assignable(target: Type, value: Type) -> bool:
+    """True si un valor de tipo `value` puede asignarse a un destino de tipo `target`.
+
+    `target is None` significa "sin tipo declarado" (no se puede validar, se deja pasar);
+    lo mismo si alguno de los dos ya es ErrorType, para no encadenar errores.
+    """
+    if target is None or value is None or is_error(target) or is_error(value):
+        return True
+    if target == value:
+        return True
+    if isinstance(target, FloatType) and isinstance(value, IntegerType):
+        return True
+    if isinstance(value, NullType) and isinstance(target, (ArrayType, ClassType)):
+        return True
+    if isinstance(target, ClassType) and isinstance(value, ClassType):
+        return value.is_subclass_of(target)
+    return False

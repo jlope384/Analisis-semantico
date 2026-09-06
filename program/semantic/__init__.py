@@ -19,6 +19,7 @@ from .types_system import (
     ERROR,
     is_numeric,
     is_error,
+    is_assignable,
 )
 from .symbol_table import (
     ScopeKind,
@@ -54,6 +55,7 @@ __all__ = [
     "ERROR",
     "is_numeric",
     "is_error",
+    "is_assignable",
     "ScopeKind",
     "Scope",
     "Symbol",
