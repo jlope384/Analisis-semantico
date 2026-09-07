@@ -65,6 +65,20 @@ class SemanticAnalyzer(CompiscriptListener):
         except DuplicateSymbolError:
             self._error(ctx, f"'{symbol.name}' ya fue declarado en este ambito ({kind_desc})")
 
+    @staticmethod
+    def _terminates_flow(stmt_ctx: "CompiscriptParser.StatementContext") -> bool:
+        return (
+            stmt_ctx.returnStatement() is not None
+            or stmt_ctx.breakStatement() is not None
+            or stmt_ctx.continueStatement() is not None
+        )
+
+    def _check_dead_code(self, statements):
+        for i, stmt in enumerate(statements):
+            if self._terminates_flow(stmt) and i + 1 < len(statements):
+                self._error(statements[i + 1], "codigo inalcanzable despues de 'return'/'break'/'continue'")
+                break
+
     def _resolve_type(self, type_ctx: "CompiscriptParser.TypeContext"):
         if type_ctx is None:
             return None
@@ -119,6 +133,7 @@ class SemanticAnalyzer(CompiscriptListener):
             self._define(VariableSymbol(name, element_type, initialized=True), parent, "variable de foreach")
 
     def exitBlock(self, ctx: CompiscriptParser.BlockContext):
+        self._check_dead_code(ctx.statement())
         self.table.exit_scope()
 
     # ------------------------------------------------------------------
@@ -766,3 +781,9 @@ class SemanticAnalyzer(CompiscriptListener):
                     f"el valor del 'case' es de tipo '{case_type.name}', "
                     f"no compatible con el tipo del 'switch' ('{switch_type.name}')",
                 )
+
+    def exitSwitchCase(self, ctx: CompiscriptParser.SwitchCaseContext):
+        self._check_dead_code(ctx.statement())
+
+    def exitDefaultCase(self, ctx: CompiscriptParser.DefaultCaseContext):
+        self._check_dead_code(ctx.statement())

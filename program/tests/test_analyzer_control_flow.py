@@ -119,3 +119,54 @@ def test_continue_outside_loop_inside_function_is_reported():
     """)
 
     assert any("continue" in m for m in messages(analyzer))
+
+
+def test_code_after_return_is_unreachable():
+    analyzer = analyze("""
+        function f(): integer {
+            return 1;
+            print(2);
+        }
+    """)
+
+    assert len(analyzer.errors) == 1
+    assert "inalcanzable" in messages(analyzer)[0]
+
+
+def test_code_after_break_is_unreachable():
+    analyzer = analyze("""
+        while (true) {
+            break;
+            print(1);
+        }
+    """)
+
+    assert len(analyzer.errors) == 1
+    assert "inalcanzable" in messages(analyzer)[0]
+
+
+def test_code_after_continue_in_switch_case_is_unreachable():
+    analyzer = analyze("""
+        let x: integer = 1;
+        switch (x) {
+            case 1:
+                break;
+                print(1);
+        }
+    """)
+
+    assert len(analyzer.errors) == 1
+    assert "inalcanzable" in messages(analyzer)[0]
+
+
+def test_return_as_last_statement_is_not_flagged():
+    analyzer = analyze("""
+        function f(): integer {
+            if (true) {
+                return 1;
+            }
+            return 2;
+        }
+    """)
+
+    assert analyzer.errors == []
