@@ -65,6 +65,51 @@ def test_break_inside_foreach_is_allowed():
     assert analyzer.errors == []
 
 
+def test_switch_case_with_incompatible_type_is_reported():
+    analyzer = analyze("""
+        let x: integer = 1;
+        switch (x) {
+            case 1:
+                print(1);
+            case "dos":
+                print(2);
+        }
+    """)
+
+    assert len(analyzer.errors) == 1
+    assert "case" in messages(analyzer)[0]
+
+
+def test_switch_case_with_compatible_type_is_allowed():
+    analyzer = analyze("""
+        let x: integer = 1;
+        switch (x) {
+            case 1:
+                print(1);
+            case 2:
+                print(2);
+            default:
+                print(0);
+        }
+    """)
+
+    assert analyzer.errors == []
+
+
+def test_break_inside_switch_case_is_allowed():
+    analyzer = analyze("""
+        let x: integer = 1;
+        switch (x) {
+            case 1:
+                break;
+            default:
+                print(0);
+        }
+    """)
+
+    assert analyzer.errors == []
+
+
 def test_continue_outside_loop_inside_function_is_reported():
     analyzer = analyze("""
         function f(): integer {

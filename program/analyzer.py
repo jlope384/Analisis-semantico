@@ -754,3 +754,15 @@ class SemanticAnalyzer(CompiscriptListener):
 
     def exitSwitchStatement(self, ctx: CompiscriptParser.SwitchStatementContext):
         self.switch_depth -= 1
+
+        switch_type = self._type(ctx.expression())
+        if is_error(switch_type):
+            return
+        for case in ctx.switchCase():
+            case_type = self._type(case.expression())
+            if not is_error(case_type) and not self._comparable(switch_type, case_type):
+                self._error(
+                    case,
+                    f"el valor del 'case' es de tipo '{case_type.name}', "
+                    f"no compatible con el tipo del 'switch' ('{switch_type.name}')",
+                )
