@@ -58,7 +58,11 @@ no se versionan — se regeneran a partir de `Compiscript.g4` en cada build.
 
 - [x] Gramática ANTLR del lenguaje.
 - [x] Entorno Docker para generar el parser y correr el analizador.
-- [ ] Tabla de símbolos.
-- [ ] Visitor de análisis semántico (sistema de tipos, ámbitos, funciones, clases, control de flujo).
-- [ ] Batería de tests.
+- [x] Tabla de símbolos con ámbitos anidados (global, función, clase, bloque).
+- [x] Visitor de análisis semántico: sistema de tipos, ámbitos, funciones, clases,
+      control de flujo (`if`/`while`/`do-while`/`for`/`foreach`/`switch`,
+      `break`/`continue`, código inalcanzable), constructores.
+- [x] Batería de tests (pytest) por regla semántica.
+- [ ] Representación visual del árbol sintáctico.
 - [ ] IDE.
+- [ ] Documentación de arquitectura.
