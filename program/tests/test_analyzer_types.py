@@ -328,6 +328,93 @@ def test_method_can_call_sibling_method_declared_later_in_source():
     assert analyzer.errors == []
 
 
+def test_constructor_call_with_wrong_argument_count_is_reported():
+    analyzer = analyze("""
+        class Animal {
+            let nombre: string;
+
+            function constructor(nombre: string) {
+                this.nombre = nombre;
+            }
+        }
+        let a: Animal = new Animal();
+    """)
+
+    assert len(analyzer.errors) == 1
+    assert "constructor" in messages(analyzer)[0]
+
+
+def test_constructor_call_with_wrong_argument_type_is_reported():
+    analyzer = analyze("""
+        class Animal {
+            let nombre: string;
+
+            function constructor(nombre: string) {
+                this.nombre = nombre;
+            }
+        }
+        let a: Animal = new Animal(5);
+    """)
+
+    assert len(analyzer.errors) == 1
+    assert "constructor" in messages(analyzer)[0]
+
+
+def test_constructor_call_with_correct_arguments_is_allowed():
+    analyzer = analyze("""
+        class Animal {
+            let nombre: string;
+
+            function constructor(nombre: string) {
+                this.nombre = nombre;
+            }
+        }
+        let a: Animal = new Animal("Firulais");
+    """)
+
+    assert analyzer.errors == []
+
+
+def test_instantiating_class_without_constructor_needs_no_arguments():
+    analyzer = analyze("""
+        class Persona {
+            let edad: integer;
+        }
+        let p: Persona = new Persona();
+    """)
+
+    assert analyzer.errors == []
+
+
+def test_instantiating_class_without_constructor_with_arguments_is_reported():
+    analyzer = analyze("""
+        class Persona {
+            let edad: integer;
+        }
+        let p: Persona = new Persona(30);
+    """)
+
+    assert len(analyzer.errors) == 1
+    assert "constructor" in messages(analyzer)[0]
+
+
+def test_subclass_without_own_constructor_uses_inherited_one():
+    analyzer = analyze("""
+        class Animal {
+            let nombre: string;
+
+            function constructor(nombre: string) {
+                this.nombre = nombre;
+            }
+        }
+        class Perro : Animal {
+        }
+        let p: Perro = new Perro("Toby");
+    """)
+
+    assert analyzer.errors == []
+
+
 def test_inherited_field_is_accessible_through_subclass_instance():
     analyzer = analyze("""
         class Animal {

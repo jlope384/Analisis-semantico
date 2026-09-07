@@ -251,8 +251,32 @@ class SemanticAnalyzer(CompiscriptListener):
         if not isinstance(symbol, ClassSymbol):
             self._error(ctx, f"clase '{text}' no declarada")
             self._set_type(ctx, ERROR)
+            return
+
+        self._set_type(ctx, symbol.type)
+
+        args = ctx.arguments().expression() if ctx.arguments() else []
+        arg_types = [self._type(a) for a in args]
+        constructor = symbol.resolve_member("constructor")
+        if not isinstance(constructor, FunctionSymbol):
+            if arg_types:
+                self._error(ctx, f"la clase '{text}' no tiene constructor, no se esperaban argumentos")
+            return
+
+        expected = constructor.param_types
+        if len(arg_types) != len(expected):
+            self._error(
+                ctx,
+                f"el constructor de '{text}' espera {len(expected)} argumento(s) y se recibieron {len(arg_types)}",
+            )
         else:
-            self._set_type(ctx, symbol.type)
+            for i, (arg_type, expected_type) in enumerate(zip(arg_types, expected), start=1):
+                if not is_assignable(expected_type, arg_type):
+                    self._error(
+                        ctx,
+                        f"el argumento {i} del constructor de '{text}' debe ser de tipo "
+                        f"'{expected_type.name}', se recibio '{arg_type.name}'",
+                    )
 
     def exitThisExpr(self, ctx: CompiscriptParser.ThisExprContext):
         if not self.class_stack:
