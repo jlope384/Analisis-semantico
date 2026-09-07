@@ -1,0 +1,58 @@
+{
+  "name": "compiscript-lsp",
+  "displayName": "Compiscript",
+  "description": "Resaltado de sintaxis, diagnosticos semanticos en vivo y arbol sintactico visual para Compiscript.",
+  "version": "0.1.0",
+  "publisher": "compiscript-team",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Programming Languages", "Linters"],
+  "activationEvents": ["onLanguage:compiscript"],
+  "main": "./src/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "compiscript",
+        "aliases": ["Compiscript", "compiscript"],
+        "extensions": [".cps"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "compiscript",
+        "scopeName": "source.compiscript",
+        "path": "./syntaxes/compiscript.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "compiscript.showParseTree",
+        "title": "Compiscript: Mostrar arbol sintactico"
+      },
+      {
+        "command": "compiscript.restartServer",
+        "title": "Compiscript: Reiniciar servidor de analisis"
+      }
+    ],
+    "configuration": {
+      "title": "Compiscript",
+      "properties": {
+        "compiscript.pythonPath": {
+          "type": "string",
+          "default": "python3",
+          "description": "Interprete de Python usado para correr el servidor de analisis (debe tener antlr4-python3-runtime y pygls instalados, y el parser ya generado con ANTLR)."
+        },
+        "compiscript.serverScript": {
+          "type": "string",
+          "default": "${workspaceFolder}/program/lsp_server.py",
+          "description": "Ruta al script del servidor LSP (program/lsp_server.py en este repo)."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

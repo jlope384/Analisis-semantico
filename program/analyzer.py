@@ -87,6 +87,8 @@ class SemanticAnalyzer(CompiscriptListener):
         base_text = base_ctx.getText()
         if base_text == "integer":
             base = INTEGER
+        elif base_text == "float":
+            base = FLOAT
         elif base_text == "string":
             base = STRING
         elif base_text == "boolean":
@@ -292,7 +294,13 @@ class SemanticAnalyzer(CompiscriptListener):
     def exitLiteralExpr(self, ctx: CompiscriptParser.LiteralExprContext):
         if ctx.Literal() is not None:
             text = ctx.Literal().getText()
-            self._set_type(ctx, STRING if text.startswith('"') else INTEGER)
+            if text.startswith('"'):
+                result = STRING
+            elif "." in text:
+                result = FLOAT
+            else:
+                result = INTEGER
+            self._set_type(ctx, result)
         elif ctx.arrayLiteral() is not None:
             self._set_type(ctx, self._type(ctx.arrayLiteral()))
         else:

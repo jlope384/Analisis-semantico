@@ -12,6 +12,13 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
+# VS Code extension (vscode-extension/)
+vscode-extension/node_modules/
+vscode-extension/*.vsix
+
+# Entorno virtual de Python (host, para correr el servidor LSP)
+.venv/
+
 # OS / editor
 .vscode/
 .DS_Store

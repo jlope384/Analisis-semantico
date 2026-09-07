@@ -1,0 +1,82 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Compiscript",
+  "scopeName": "source.compiscript",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#literals" },
+    { "include": "#operators" },
+    { "include": "#functions" },
+    { "include": "#classes" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.compiscript", "match": "//.*$" },
+        { "name": "comment.block.compiscript", "begin": "/\\*", "end": "\\*/" }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.compiscript",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [{ "name": "constant.character.escape.compiscript", "match": "\\\\." }]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.float.compiscript", "match": "\\b[0-9]+\\.[0-9]+\\b" },
+        { "name": "constant.numeric.integer.compiscript", "match": "\\b[0-9]+\\b" }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.compiscript",
+          "match": "\\b(if|else|while|do|for|foreach|in|try|catch|switch|case|default|break|continue|return)\\b"
+        },
+        {
+          "name": "keyword.other.compiscript",
+          "match": "\\b(let|var|const|function|class|new|this|print)\\b"
+        }
+      ]
+    },
+    "types": {
+      "name": "storage.type.compiscript",
+      "match": "\\b(boolean|integer|float|string)\\b"
+    },
+    "literals": {
+      "name": "constant.language.compiscript",
+      "match": "\\b(true|false|null)\\b"
+    },
+    "operators": {
+      "name": "keyword.operator.compiscript",
+      "match": "(==|!=|<=|>=|&&|\\|\\||[+\\-*/%=<>!?:])"
+    },
+    "functions": {
+      "patterns": [
+        {
+          "match": "\\b(function)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.compiscript" },
+            "2": { "name": "entity.name.function.compiscript" }
+          }
+        },
+        {
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+          "name": "entity.name.function.call.compiscript"
+        }
+      ]
+    },
+    "classes": {
+      "match": "\\b(class)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+      "captures": {
+        "1": { "name": "keyword.other.compiscript" },
+        "2": { "name": "entity.name.class.compiscript" }
+      }
+    }
+  }
+}

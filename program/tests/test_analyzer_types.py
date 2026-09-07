@@ -27,6 +27,49 @@ def test_arithmetic_between_incompatible_types_is_reported():
     assert "+" in messages(analyzer)[0]
 
 
+def test_float_literal_declaration_is_allowed():
+    analyzer = analyze("let x: float = 3.14;")
+
+    assert analyzer.errors == []
+
+
+def test_integer_is_assignable_to_float_variable():
+    analyzer = analyze("""
+        let x: float = 1;
+        x = 2;
+    """)
+
+    assert analyzer.errors == []
+
+
+def test_float_is_not_assignable_to_integer_variable():
+    analyzer = analyze("let x: integer = 3.14;")
+
+    assert len(analyzer.errors) == 1
+    assert "x" in messages(analyzer)[0]
+
+
+def test_arithmetic_between_integer_and_float_promotes_to_float():
+    analyzer = analyze("""
+        let x: integer = 1;
+        let y: float = 2.5;
+        let z: float = x + y;
+    """)
+
+    assert analyzer.errors == []
+
+
+def test_arithmetic_between_integer_and_float_is_not_assignable_to_integer():
+    analyzer = analyze("""
+        let x: integer = 1;
+        let y: float = 2.5;
+        let z: integer = x + y;
+    """)
+
+    assert len(analyzer.errors) == 1
+    assert "z" in messages(analyzer)[0]
+
+
 def test_string_concatenation_is_allowed():
     analyzer = analyze('let saludo: string = "hola " + "mundo";')
 
