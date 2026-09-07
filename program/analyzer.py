@@ -44,6 +44,8 @@ class SemanticAnalyzer(CompiscriptListener):
         self.errors: list[SemanticError] = []
         self.function_stack: list[FunctionSymbol] = []
         self.class_stack: list[ClassSymbol] = []
+        self.loop_depth = 0
+        self.switch_depth = 0
 
         self.types = {}  # ctx de expresion -> Type ya inferido/verificado
         self._suffix_base = {}  # SuffixOpContext -> Type sobre el que se aplico
@@ -559,11 +561,37 @@ class SemanticAnalyzer(CompiscriptListener):
     def exitIfStatement(self, ctx: CompiscriptParser.IfStatementContext):
         self._check_boolean_condition(ctx.expression(), "if")
 
+    def enterWhileStatement(self, ctx: CompiscriptParser.WhileStatementContext):
+        self.loop_depth += 1
+
     def exitWhileStatement(self, ctx: CompiscriptParser.WhileStatementContext):
         self._check_boolean_condition(ctx.expression(), "while")
+        self.loop_depth -= 1
+
+    def enterDoWhileStatement(self, ctx: CompiscriptParser.DoWhileStatementContext):
+        self.loop_depth += 1
 
     def exitDoWhileStatement(self, ctx: CompiscriptParser.DoWhileStatementContext):
         self._check_boolean_condition(ctx.expression(), "do-while")
+        self.loop_depth -= 1
+
+    def enterForeachStatement(self, ctx: CompiscriptParser.ForeachStatementContext):
+        self.loop_depth += 1
+
+    def exitForeachStatement(self, ctx: CompiscriptParser.ForeachStatementContext):
+        self.loop_depth -= 1
+
+    # ------------------------------------------------------------------
+    # break / continue: solo dentro de bucles (break tambien en switch)
+    # ------------------------------------------------------------------
+
+    def exitBreakStatement(self, ctx: CompiscriptParser.BreakStatementContext):
+        if self.loop_depth == 0 and self.switch_depth == 0:
+            self._error(ctx, "'break' solo puede usarse dentro de un bucle o un switch")
+
+    def exitContinueStatement(self, ctx: CompiscriptParser.ContinueStatementContext):
+        if self.loop_depth == 0:
+            self._error(ctx, "'continue' solo puede usarse dentro de un bucle")
 
     @staticmethod
     def _for_condition(ctx: CompiscriptParser.ForStatementContext):
@@ -708,9 +736,21 @@ class SemanticAnalyzer(CompiscriptListener):
 
     def enterForStatement(self, ctx: CompiscriptParser.ForStatementContext):
         self.table.enter_scope(ScopeKind.BLOCK)
+        self.loop_depth += 1
 
     def exitForStatement(self, ctx: CompiscriptParser.ForStatementContext):
         condition = self._for_condition(ctx)
         if condition is not None:
             self._check_boolean_condition(condition, "for")
         self.table.exit_scope()
+        self.loop_depth -= 1
+
+    # ------------------------------------------------------------------
+    # switch: el depth habilita 'break' dentro de sus casos
+    # ------------------------------------------------------------------
+
+    def enterSwitchStatement(self, ctx: CompiscriptParser.SwitchStatementContext):
+        self.switch_depth += 1
+
+    def exitSwitchStatement(self, ctx: CompiscriptParser.SwitchStatementContext):
+        self.switch_depth -= 1
