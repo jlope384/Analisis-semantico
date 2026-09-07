@@ -102,6 +102,38 @@ def test_while_condition_must_be_boolean():
     assert "while" in messages(analyzer)[0]
 
 
+def test_for_condition_must_be_boolean():
+    analyzer = analyze("""
+        for (let i: integer = 0; i; i = i + 1) {
+            print(i);
+        }
+    """)
+
+    assert len(analyzer.errors) == 1
+    assert "for" in messages(analyzer)[0]
+
+
+def test_for_condition_boolean_is_allowed():
+    analyzer = analyze("""
+        for (let i: integer = 0; i < 3; i = i + 1) {
+            print(i);
+        }
+    """)
+
+    assert analyzer.errors == []
+
+
+def test_for_without_condition_is_allowed():
+    analyzer = analyze("""
+        for (let i: integer = 0; ; i = i + 1) {
+            print(i);
+            break;
+        }
+    """)
+
+    assert analyzer.errors == []
+
+
 def test_logical_operator_requires_boolean_operands():
     analyzer = analyze("let x: boolean = 1 && true;")
 

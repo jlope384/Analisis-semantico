@@ -5,6 +5,8 @@ Listener para recorrerlo, resolviendo ambitos, declaraciones y tipos sobre
 una SymbolTable.
 """
 
+from antlr4.tree.Tree import TerminalNode
+
 from CompiscriptListener import CompiscriptListener
 from CompiscriptParser import CompiscriptParser
 
@@ -563,6 +565,25 @@ class SemanticAnalyzer(CompiscriptListener):
     def exitDoWhileStatement(self, ctx: CompiscriptParser.DoWhileStatementContext):
         self._check_boolean_condition(ctx.expression(), "do-while")
 
+    @staticmethod
+    def _for_condition(ctx: CompiscriptParser.ForStatementContext):
+        """La expresion de condicion del 'for', si fue escrita.
+
+        `expression()` no distingue por si sola condicion de actualizacion
+        cuando solo una de las dos esta presente, asi que se ubica primero
+        el ';' que separa ambas (el ultimo ';' hijo directo del contexto).
+        """
+        children = ctx.children
+        separator_index = None
+        for i, child in enumerate(children):
+            if isinstance(child, TerminalNode) and child.getText() == ";":
+                separator_index = i
+
+        for i, child in enumerate(children):
+            if isinstance(child, CompiscriptParser.ExpressionContext) and i < separator_index:
+                return child
+        return None
+
     # ------------------------------------------------------------------
     # funciones
     # ------------------------------------------------------------------
@@ -689,4 +710,7 @@ class SemanticAnalyzer(CompiscriptListener):
         self.table.enter_scope(ScopeKind.BLOCK)
 
     def exitForStatement(self, ctx: CompiscriptParser.ForStatementContext):
+        condition = self._for_condition(ctx)
+        if condition is not None:
+            self._check_boolean_condition(condition, "for")
         self.table.exit_scope()
