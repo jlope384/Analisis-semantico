@@ -3,6 +3,10 @@
 Implementación del analizador léxico, sintáctico y semántico de Compiscript
 (fase de Análisis Semántico) usando ANTLR4 con target Python3.
 
+# Link al video:
+https://drive.google.com/drive/folders/1oJakUhT_LeHLsataZ9m95zVwSX6Z9hN2?usp=sharing
+
+
 Ver [Instrucciones.md](Instrucciones.md) para el enunciado completo de la tarea
 y [ARCHITECTURE.md](ARCHITECTURE.md) para el detalle de la arquitectura.
 
