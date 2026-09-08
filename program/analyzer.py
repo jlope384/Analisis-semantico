@@ -43,6 +43,7 @@ class SemanticAnalyzer(CompiscriptListener):
         self.table = SymbolTable()
         self.errors: list[SemanticError] = []
         self.function_stack: list[FunctionSymbol] = []
+        self.returns_seen: list[bool] = []  # paralelo a function_stack: si ya se vio un 'return'
         self.class_stack: list[ClassSymbol] = []
         self.loop_depth = 0
         self.switch_depth = 0
@@ -688,19 +689,29 @@ class SemanticAnalyzer(CompiscriptListener):
         scope = self.table.enter_scope(ScopeKind.FUNCTION, owner=symbol)
         symbol.scope = scope
         self.function_stack.append(symbol)
+        self.returns_seen.append(False)
 
         for param in params:
             self._define(param, ctx, "parametro")
 
     def exitFunctionDeclaration(self, ctx: CompiscriptParser.FunctionDeclarationContext):
         self.table.exit_scope()
-        self.function_stack.pop()
+        symbol = self.function_stack.pop()
+        had_return = self.returns_seen.pop()
+
+        if not had_return and symbol.return_type is not None and symbol.return_type != VOID:
+            self._error(
+                ctx,
+                f"la funcion '{symbol.name}' declara tipo de retorno "
+                f"'{symbol.return_type.name}' pero no tiene ninguna sentencia 'return'",
+            )
 
     def exitReturnStatement(self, ctx: CompiscriptParser.ReturnStatementContext):
         if not self.function_stack:
             self._error(ctx, "'return' fuera de una funcion")
             return
 
+        self.returns_seen[-1] = True
         function = self.function_stack[-1]
         expr = ctx.expression()
         value_type = self._type(expr) if expr is not None else VOID
