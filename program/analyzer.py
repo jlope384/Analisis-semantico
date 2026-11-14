@@ -142,7 +142,8 @@ class SemanticAnalyzer(CompiscriptListener):
         parent = ctx.parentCtx
         if isinstance(parent, CompiscriptParser.TryCatchStatementContext) and parent.block(1) is ctx:
             name = parent.Identifier().getText()
-            symbol = VariableSymbol(name, None, initialized=True)
+            # La variable del catch recibe el mensaje del error (un string).
+            symbol = VariableSymbol(name, STRING, initialized=True)
             self._define(symbol, parent, "variable de catch")
             self.symbol_of[parent] = symbol
             self._allocate(symbol)

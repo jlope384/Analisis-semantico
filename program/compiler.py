@@ -1,8 +1,8 @@
-"""Pipeline completo: fuente -> parser -> analisis semantico -> TAC.
+"""Pipeline completo: fuente -> parser -> analisis semantico -> TAC -> MIPS.
 
 `Driver.py` (CLI) y `lsp_server.py` (editor) son clientes delgados de este
-modulo. El TAC solo se genera si el programa no tiene errores lexicos,
-sintacticos ni semanticos.
+modulo. El TAC y el MIPS solo se generan si el programa no tiene errores
+lexicos, sintacticos ni semanticos.
 """
 
 from dataclasses import dataclass, field
@@ -14,6 +14,7 @@ from CompiscriptLexer import CompiscriptLexer
 from CompiscriptParser import CompiscriptParser
 from analyzer import SemanticAnalyzer
 from tac_generator import TACGenerator
+from codegen.mips_generator import MIPSGenerator, CodeGenError
 from semantic import ClassSymbol
 
 
@@ -33,11 +34,13 @@ class CompileResult:
     syntax_errors: list = field(default_factory=list)
     analyzer: SemanticAnalyzer = None
     tac: object = None  # TACProgram, solo si no hubo errores
+    mips: str = None  # ensamblador MIPS, solo si no hubo errores
+    codegen_errors: list = field(default_factory=list)
 
     @property
     def errors(self) -> list[str]:
         semantic = [str(e) for e in self.analyzer.errors] if self.analyzer else []
-        return self.syntax_errors + semantic
+        return self.syntax_errors + semantic + self.codegen_errors
 
 
 def compile_source(source: str) -> CompileResult:
@@ -61,7 +64,12 @@ def compile_source(source: str) -> CompileResult:
     if analyzer.errors:
         return result
 
-    result.tac = TACGenerator(analyzer).generate(tree)
+    generator = TACGenerator(analyzer)
+    result.tac = generator.generate(tree)
+    try:
+        result.mips = MIPSGenerator(result.tac, generator, analyzer).generate()
+    except CodeGenError as error:
+        result.codegen_errors.append(f"Error de generacion de codigo: {error}")
     return result
 
 

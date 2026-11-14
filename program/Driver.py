@@ -6,7 +6,18 @@ from compiler import compile_source, describe_memory
 from tree_export import tree_to_dict, tree_to_dot
 
 
-def main(path: str, tree_output: str = None, tac_output: str = None, show_symbols: bool = False) -> int:
+def _write_output(destination: str, content: str, description: str):
+    """Escribe `content` a stdout ('-') o al archivo indicado."""
+    if destination == "-":
+        print(content)
+        return
+    with open(destination, "w", encoding="utf-8") as f:
+        f.write(content.rstrip("\n") + "\n")
+    print(f"{description} escrito en '{destination}'")
+
+
+def main(path: str, tree_output: str = None, tac_output: str = None, show_symbols: bool = False,
+         mips_output: str = None) -> int:
     with open(path, encoding="utf-8-sig") as f:  # -sig: ignora el BOM que agregan algunos editores
         result = compile_source(f.read())
 
@@ -26,13 +37,10 @@ def main(path: str, tree_output: str = None, tac_output: str = None, show_symbol
 
     if show_symbols:
         print(describe_memory(result.analyzer))
-
-    if tac_output == "-":
-        print(result.tac)
-    elif tac_output is not None:
-        with open(tac_output, "w", encoding="utf-8") as f:
-            f.write(str(result.tac) + "\n")
-        print(f"Codigo intermedio escrito en '{tac_output}'")
+    if tac_output is not None:
+        _write_output(tac_output, str(result.tac), "Codigo intermedio")
+    if mips_output is not None:
+        _write_output(mips_output, result.mips, "Codigo MIPS")
 
     return 0
 
@@ -49,5 +57,9 @@ if __name__ == "__main__":
         "--symbols", action="store_true",
         help="muestra la tabla de simbolos con direcciones y registros de activacion",
     )
+    arg_parser.add_argument(
+        "--mips", metavar="SALIDA", nargs="?", const="-",
+        help="genera el ensamblador MIPS (a stdout, o al archivo indicado, p.ej. programa.asm)",
+    )
     args = arg_parser.parse_args()
-    sys.exit(main(args.archivo, args.tree, args.tac, args.symbols))
+    sys.exit(main(args.archivo, args.tree, args.tac, args.symbols, args.mips))

@@ -439,7 +439,7 @@ class TACGenerator(ParseTreeVisitor):
             self._emit(Quad(tac.PARAM, value))
         self._release(receiver, target, *values)
         result = self._new_temp() if returns_value else None
-        self._emit(Quad(tac.CALL, target, str(len(values) + 1), result, type=method.return_type))
+        self._emit(Quad(tac.CALL, target, str(len(values) + 1), result, type=method.type))
         return result
 
     # ------------------------------------------------------------------

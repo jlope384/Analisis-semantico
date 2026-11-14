@@ -47,8 +47,9 @@ class Quad:
     arg2: str = None
     result: str = None
     operator: str = None  # operador concreto para BINARY / UNARY
-    # Tipo del valor que produce la instruccion, solo cuando el backend no puede
-    # deducirlo de sus operandos (new_array y llamadas por la vtable).
+    # Informacion de tipos para el backend cuando no se deduce de los operandos:
+    # en `new_array` el tipo del arreglo, y en una llamada por la vtable el
+    # tipo (FunctionType) del metodo invocado.
     type: object = None
 
     def __str__(self):
