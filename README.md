@@ -1,16 +1,19 @@
-# Compiscript — Análisis Semántico y Generación de Código Intermedio
+# Compiscript — Compilador a MIPS
 
 Implementación del compilador de Compiscript con ANTLR4 y target Python3.
-Cubre el análisis léxico, sintáctico y semántico, y la generación de
-código intermedio (TAC).
+Cubre el análisis léxico, sintáctico y semántico, la generación de
+código intermedio (TAC) y la generación de ensamblador MIPS, que se
+ejecuta en el simulador MARS.
 
 # Link al video:
 https://drive.google.com/drive/folders/1oJakUhT_LeHLsataZ9m95zVwSX6Z9hN2?usp=sharing
    
 
 Ver [Instrucciones.md](Instrucciones.md) para el enunciado completo de la tarea
-y [ARCHITECTURE.md](ARCHITECTURE.md) para el detalle de la arquitectura, y
-[TAC.md](TAC.md) para la documentación del código intermedio.
+y [ARCHITECTURE.md](ARCHITECTURE.md) para el detalle de la arquitectura,
+[TAC.md](TAC.md) para la documentación del código intermedio y
+[CODEGEN.md](CODEGEN.md) para la generación de MIPS (memoria, secuencia de
+llamada, asignación de registros con `getReg` y runtime).
 
 ## Estructura del repositorio
 
@@ -18,11 +21,14 @@ y [ARCHITECTURE.md](ARCHITECTURE.md) para el detalle de la arquitectura, y
 program/
   Compiscript.g4        Gramática ANTLR (lexer + parser)
   Driver.py              Punto de entrada CLI: compila un .cps, reporta errores y opcionalmente
-                          exporta el arbol (--tree), el TAC (--tac) y la tabla de simbolos (--symbols)
+                          exporta el arbol (--tree), el TAC (--tac), la tabla de simbolos (--symbols)
+                          y el ensamblador MIPS (--mips)
   compiler.py            Pipeline: parser -> analisis semantico -> generacion de TAC
   analyzer.py            Analisis semantico (Listener) + asignacion de direcciones
   tac_generator.py       Generacion de codigo de tres direcciones (Visitor)
   ir/                     Representacion intermedia: cuadruplos, temporales y etiquetas
+  codegen/                Backend MIPS: liveness, asignacion de registros (getReg),
+                          traduccion TAC -> MIPS, runtime y ejecucion en MARS
   lsp_server.py           Servidor LSP (pygls) que expone el analizador a un editor
   tree_export.py          Arbol de ANTLR -> dict JSON / grafo Graphviz DOT
   program.cps            Programa de ejemplo usado para pruebas manuales
@@ -37,7 +43,8 @@ ARCHITECTURE.md           Documentacion de arquitectura
 ## Entorno de desarrollo (Docker)
 
 El proyecto se construye y ejecuta dentro de un contenedor Docker que trae Java
-(requerido por la herramienta ANTLR) y el runtime de Python para ANTLR.
+(requerido por la herramienta ANTLR y por MARS), el runtime de Python para ANTLR
+y el simulador MIPS **MARS 4.5.1** (comando `mars`).
 
 1. Construir la imagen:
 
@@ -72,7 +79,19 @@ El proyecto se construye y ejecuta dentro de un contenedor Docker que trae Java
    python3 Driver.py program.cps --symbols
    ```
 
-6. Correr la batería de tests:
+6. Generar el ensamblador MIPS y ejecutarlo en MARS:
+
+   ```bash
+   python3 Driver.py program.cps --mips program.asm
+   mars program.asm
+   ```
+
+   El `.asm` también se puede abrir en la interfaz gráfica de MARS
+   (descargable de https://github.com/dpetersanderson/MARS/releases) para
+   ejecutarlo paso a paso.
+
+7. Correr la batería de tests (dentro del contenedor también se ejecutan
+   los tests que corren el MIPS generado en MARS):
 
    ```bash
    pytest
@@ -147,6 +166,14 @@ Para compilar el archivo activo, corre **"Compiscript: Compilar y mostrar
 codigo intermedio (TAC)"**. El TAC y la tabla de símbolos con direcciones
 se abren en un documento al lado del editor. Si el programa tiene errores,
 la extensión los indica y no genera el TAC.
+
+Para generar el ensamblador, corre **"Compiscript: Compilar a MIPS
+(.asm)"**: guarda `archivo.asm` junto al `.cps` y lo abre. **"Compiscript:
+Compilar y ejecutar en MARS"** además lo ejecuta en una terminal de VS Code.
+Por defecto usa el contenedor (`docker run ... csp-image mars archivo.asm`,
+así que la imagen `csp-image` debe estar construida). Para usar MARS sin
+Docker, cambia `compiscript.runCommand` a
+`java -jar C:/ruta/Mars4_5.jar nc "${asm}"`.
 
 Si algo se traba, **"Compiscript: Reiniciar servidor de análisis"**
 reinicia el proceso del servidor sin cerrar VS Code.

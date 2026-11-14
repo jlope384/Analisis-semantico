@@ -22,3 +22,6 @@ vscode-extension/*.vsix
 # OS / editor
 .vscode/
 .DS_Store
+
+# Ensamblador generado por los comandos de VS Code / Driver
+program/*.asm

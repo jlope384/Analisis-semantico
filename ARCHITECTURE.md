@@ -1,7 +1,14 @@
 # Arquitectura
 
-Este documento describe cómo está organizado el compilador (fase de análisis
-léxico/sintáctico/semántico) y cómo encajan sus piezas.
+Este documento describe cómo está organizado el compilador (análisis
+léxico/sintáctico/semántico, código intermedio y generación de MIPS) y cómo
+encajan sus piezas.
+
+```
+fuente .cps ─> lexer/parser (ANTLR) ─> SemanticAnalyzer ─> TACGenerator ─> MIPSGenerator ─> .asm ─> MARS
+                                        (tipos, ámbitos,     (TAC en         (getReg, marcos,
+                                         direcciones)         cuádruplos)     runtime)
+```
 
 ## Vista general
 
@@ -127,11 +134,24 @@ analizador. Cada función se genera en su propio búfer
 pila de etiquetas de `break`/`continue`. Al cerrar la función, el tamaño
 de su registro de activación se completa con los temporales usados.
 
+### `program/codegen/` — generación de MIPS
+
+Backend que traduce el TAC a ensamblador MIPS para MARS:
+`liveness.py` (bloques básicos, vida de temporales y siguiente uso),
+`registers.py` (descriptores de registros y `getReg`), `mips_generator.py`
+(secuencia de llamada, traducción de cada cuádruplo) y `runtime.py` (rutinas
+de soporte en ensamblador). Para saber la dirección y el tipo de cada
+operando usa los registros de activación y la tabla nombre → símbolo que
+expone `TACGenerator` (`frames`, `function_symbols`, `names`). Está
+documentado en [`CODEGEN.md`](CODEGEN.md).
+
 ### `program/compiler.py` — pipeline
 
 `compile_source(fuente)` corre lexer → parser → `SemanticAnalyzer` →
-`TACGenerator` y devuelve un `CompileResult` (árbol, errores, analizador,
-TAC). El TAC solo se genera si no hubo errores. `describe_memory` arma el
+`TACGenerator` → `MIPSGenerator` y devuelve un `CompileResult` (árbol,
+errores, analizador, TAC, MIPS). El TAC y el MIPS solo se generan si no
+hubo errores; una construcción que el backend no soporta (closures) se
+reporta como error de generación de código. `describe_memory` arma el
 reporte de la tabla de símbolos con direcciones. Tanto `Driver.py` como
 los tests usan este módulo.
 
@@ -149,7 +169,8 @@ Punto de entrada por línea de comandos (sobre `compiler.py`): compila un
 `.cps` e imprime los errores de sintaxis o de semántica. Opciones:
 `--tree <archivo.json|archivo.dot>` vuelca el árbol sintáctico, `--tac
 [archivo]` emite el código de tres direcciones y `--symbols` muestra la
-tabla de símbolos con direcciones y registros de activación.
+tabla de símbolos con direcciones y registros de activación. `--mips
+[archivo.asm]` emite el ensamblador MIPS.
 
 ### `program/lsp_server.py` — servidor para el editor
 
@@ -161,7 +182,9 @@ publica los errores (de sintaxis y semánticos) como diagnósticos LSP —
 esto es lo que hace que aparezcan subrayados en rojo en el editor sin
 que el usuario ejecute nada manualmente. También expone un comando
 custom, `compiscript/parseTree`, que devuelve el árbol del último parseo
-exitoso como JSON (vía `tree_export.tree_to_dict`).
+exitoso como JSON (vía `tree_export.tree_to_dict`), y `compiscript/tac`
+y `compiscript/mips`, que compilan el documento y devuelven su TAC o su
+ensamblador.
 
 ### `vscode-extension/` — el "IDE"
 
@@ -178,6 +201,11 @@ una extensión de VS Code que actúa de cliente LSP:
   árbol sintáctico"**, que le pide al servidor el árbol del archivo activo
   y lo pinta como una lista anidada colapsable en un panel webview — esta
   es la representación visual del árbol sintáctico integrada al editor.
+- Comandos **"Compilar y mostrar código intermedio (TAC)"**, **"Compilar a
+  MIPS (.asm)"** (guarda el `.asm` junto al `.cps` y lo abre) y **"Compilar
+  y ejecutar en MARS"** (además lo ejecuta en una terminal con el comando
+  configurado en `compiscript.runCommand`, por defecto el contenedor de
+  Docker).
 
 Ver `README.md` para los pasos de instalación y uso.
 

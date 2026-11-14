@@ -54,6 +54,11 @@ son nombres de variables, temporales (`t1`, `t2`, …), etiquetas (`L1`,
 `TACProgram.lines()` imprime la forma textual, y `Quad.as_row()` da la
 fila del cuádruplo (para mostrarlo como tabla).
 
+`Quad.type` lleva información de tipos para el backend en los dos casos en
+que no se deduce de los operandos: en `new_array` es el tipo del arreglo, y
+en una llamada por la vtable es el tipo del método invocado. La traducción
+de este TAC a MIPS se documenta en [CODEGEN.md](CODEGEN.md).
+
 ## 2. Organización de memoria
 
 La tabla de símbolos (`semantic/`) se amplió para que cada variable tenga
@@ -183,7 +188,9 @@ L1:                                                                  upd
 
 `break` salta a la etiqueta de salida del bucle o `switch` más interno, y
 `continue` a la etiqueta de continuación del bucle más interno (que en un
-`for` es la actualización). El generador omite un `goto` que quedaría
+`for` es la actualización). Si el salto sale de uno o más `try`, antes se
+emite un `try_end` por cada uno (lo mismo con `return`), para que el
+manejador de errores no quede registrado. El generador omite un `goto` que quedaría
 justo después de otro salto incondicional, porque nunca se ejecutaría.
 
 ### switch
@@ -344,7 +351,7 @@ try_begin L1      ; un error en tiempo de ejecución salta a L1
 try_end
 goto L2
 L1:
-err = catch       ; la variable del catch recibe el error
+err = catch       ; la variable del catch (string) recibe el mensaje del error
 ...cuerpo del catch...
 L2:
 ```
