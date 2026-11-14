@@ -12,6 +12,8 @@ ofrecerle a un editor (VS Code, via `vscode-extension/`) dos cosas:
   3. Un request custom `compiscript/tac` que compila el documento y
      devuelve su codigo de tres direcciones y la tabla de simbolos con
      direcciones (o los errores, si los hay).
+  4. Un request custom `compiscript/mips` que devuelve el ensamblador MIPS
+     del documento, para guardarlo como .asm y ejecutarlo en MARS.
 
 No se agrega logica semantica aqui: este archivo es solo el adaptador
 entre `analyzer.py` y el protocolo LSP.
@@ -131,6 +133,18 @@ def tac(ls: LanguageServer, params):
     if result.errors:
         return {"errors": result.errors}
     return {"tac": str(result.tac), "symbols": describe_memory(result.analyzer)}
+
+
+@server.command("compiscript/mips")
+def mips(ls: LanguageServer, params):
+    uri = params[0] if params else None
+    if uri is None:
+        return {"error": "no se indico el documento a compilar"}
+
+    result = compile_source(ls.workspace.get_text_document(uri).source)
+    if result.errors:
+        return {"errors": result.errors}
+    return {"mips": result.mips}
 
 
 if __name__ == "__main__":

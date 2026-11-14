@@ -1,7 +1,7 @@
 {
   "name": "compiscript-lsp",
   "displayName": "Compiscript",
-  "description": "Resaltado de sintaxis, diagnosticos semanticos en vivo, arbol sintactico visual y codigo intermedio (TAC) para Compiscript.",
+  "description": "Resaltado de sintaxis, diagnosticos semanticos en vivo, arbol sintactico visual, codigo intermedio (TAC) y compilacion a MIPS para Compiscript.",
   "version": "0.1.0",
   "publisher": "compiscript-team",
   "engines": {
@@ -36,6 +36,14 @@
         "title": "Compiscript: Compilar y mostrar codigo intermedio (TAC)"
       },
       {
+        "command": "compiscript.compileMips",
+        "title": "Compiscript: Compilar a MIPS (.asm)"
+      },
+      {
+        "command": "compiscript.runMips",
+        "title": "Compiscript: Compilar y ejecutar en MARS"
+      },
+      {
         "command": "compiscript.restartServer",
         "title": "Compiscript: Reiniciar servidor de analisis"
       }
@@ -52,6 +60,11 @@
           "type": "string",
           "default": "${workspaceFolder}/program/lsp_server.py",
           "description": "Ruta al script del servidor LSP (program/lsp_server.py en este repo)."
+        },
+        "compiscript.runCommand": {
+          "type": "string",
+          "default": "docker run --rm -i -v \"${dir}:/w\" csp-image mars \"/w/${file}\"",
+          "description": "Comando para ejecutar el .asm generado en MARS. ${asm} es la ruta completa del archivo, ${dir} su carpeta y ${file} su nombre. Sin Docker se puede usar: java -jar C:/ruta/Mars4_5.jar nc \"${asm}\""
         }
       }
     }

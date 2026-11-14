@@ -1,8 +1,10 @@
 // Cliente LSP para Compiscript: arranca `program/lsp_server.py` como
 // proceso hijo y lo conecta a VS Code por stdio. Los diagnosticos llegan
 // solos via el protocolo LSP; los comandos custom piden el arbol
-// sintactico (para pintarlo en un webview) y el codigo intermedio.
+// sintactico (para pintarlo en un webview), el codigo intermedio y el
+// ensamblador MIPS, que se guarda como .asm y se ejecuta en MARS.
 
+const fs = require("fs");
 const path = require("path");
 const vscode = require("vscode");
 const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
@@ -111,6 +113,79 @@ function activate(context) {
         await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
       } catch (err) {
         vscode.window.showErrorMessage(`No se pudo generar el codigo intermedio: ${err.message || err}`);
+      }
+    })
+  );
+
+  registerMipsCommands(context);
+}
+
+function activeCompiscriptEditor(action) {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== "compiscript") {
+    vscode.window.showWarningMessage(`Abre un archivo .cps para ${action}.`);
+    return null;
+  }
+  return editor;
+}
+
+// Compila el documento a MIPS y lo guarda junto al .cps; devuelve la ruta del .asm.
+async function compileToAsm(editor) {
+  await editor.document.save();
+  const result = await client.sendRequest("workspace/executeCommand", {
+    command: "compiscript/mips",
+    arguments: [editor.document.uri.toString()],
+  });
+  if (result.error) {
+    vscode.window.showWarningMessage(result.error);
+    return null;
+  }
+  if (result.errors) {
+    vscode.window.showErrorMessage(
+      `El programa tiene ${result.errors.length} error(es); corrigelos para generar el MIPS: ${result.errors[0]}`
+    );
+    return null;
+  }
+  const source = editor.document.fileName;
+  const asmPath = path.join(path.dirname(source), path.basename(source, path.extname(source)) + ".asm");
+  fs.writeFileSync(asmPath, result.mips, "utf8");
+  return asmPath;
+}
+
+function registerMipsCommands(context) {
+  context.subscriptions.push(
+    vscode.commands.registerCommand("compiscript.compileMips", async () => {
+      const editor = activeCompiscriptEditor("compilarlo");
+      if (!editor) return;
+      try {
+        const asmPath = await compileToAsm(editor);
+        if (!asmPath) return;
+        const doc = await vscode.workspace.openTextDocument(asmPath);
+        await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+        vscode.window.showInformationMessage(`Codigo MIPS escrito en ${path.basename(asmPath)}`);
+      } catch (err) {
+        vscode.window.showErrorMessage(`No se pudo generar el MIPS: ${err.message || err}`);
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("compiscript.runMips", async () => {
+      const editor = activeCompiscriptEditor("ejecutarlo");
+      if (!editor) return;
+      try {
+        const asmPath = await compileToAsm(editor);
+        if (!asmPath) return;
+        const template = vscode.workspace.getConfiguration("compiscript").get("runCommand");
+        const command = template
+          .split("${asm}").join(asmPath)
+          .split("${dir}").join(path.dirname(asmPath))
+          .split("${file}").join(path.basename(asmPath));
+        const terminal = vscode.window.createTerminal({ name: `MARS: ${path.basename(asmPath)}` });
+        terminal.show();
+        terminal.sendText(command);
+      } catch (err) {
+        vscode.window.showErrorMessage(`No se pudo ejecutar el programa: ${err.message || err}`);
       }
     })
   );
