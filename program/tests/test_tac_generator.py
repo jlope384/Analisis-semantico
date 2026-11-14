@@ -558,3 +558,46 @@ def test_try_catch_registers_handler_and_binds_error():
         "print err",
         "L2:",
     ]
+
+
+def test_break_inside_try_removes_the_handler_before_leaving():
+    body = main_body("""
+        while (true) {
+          try { break; } catch (err) { print(err); }
+        }
+    """)
+    start = body.index("try_begin L3")
+    assert body[start + 1:start + 3] == ["try_end", "goto L2"]
+
+
+def test_return_inside_try_removes_the_handler_before_returning():
+    body = function_body("""
+        function f(): integer {
+          try { return 1; } catch (err) { return 2; }
+        }
+    """, "f")
+    assert body[:3] == ["try_begin L1", "try_end", "return 1"]
+    # dentro del catch el manejador ya fue quitado por el runtime
+    assert "return 2" in body
+    assert body[body.index("return 2") - 1] == "err = catch"
+
+
+def test_generator_exposes_frames_and_names_for_the_backend():
+    source = """
+        let g: integer = 1;
+        function f(n: integer): integer { let r: integer = n; return r; }
+        let xs: integer[] = [1, 2];
+    """
+    parser = CompiscriptParser(CommonTokenStream(CompiscriptLexer(InputStream(source))))
+    tree = parser.program()
+    analyzer = SemanticAnalyzer()
+    ParseTreeWalker.DEFAULT.walk(analyzer, tree)
+    generator = TACGenerator(analyzer)
+    program = generator.generate(tree)
+
+    assert set(generator.frames) == {"f", "main"}
+    assert generator.function_symbols["f"].name == "f"
+    assert set(generator.names["f"]) == {"n", "r"}
+    assert set(generator.names["global"]) == {"g", "xs"}
+    new_array = next(q for q in program if q.op == "new_array")
+    assert new_array.type.name == "integer[]"

@@ -29,9 +29,11 @@ class _FunctionContext:
         self.symbol = symbol
         self.code = TACProgram()
         self.temps = TempAllocator()
-        # (etiqueta de break, etiqueta de continue) de los bucles/switch abiertos;
-        # un switch no tiene continue (None), asi que 'continue' busca el bucle mas cercano.
-        self.jumps: list[tuple[str, str]] = []
+        # (etiqueta de break, etiqueta de continue, try abiertos al entrar) de los
+        # bucles/switch abiertos; un switch no tiene continue (None), asi que
+        # 'continue' busca el bucle mas cercano.
+        self.jumps: list[tuple[str, str, int]] = []
+        self.try_depth = 0  # try abiertos en este punto de la funcion
 
 
 class TACGenerator(ParseTreeVisitor):
@@ -44,6 +46,10 @@ class TACGenerator(ParseTreeVisitor):
         self._used_names = {}  # etiqueta de funcion / 'global' -> nombres ya usados
         self.classes = [s for s in analyzer.table.global_scope.symbols.values() if isinstance(s, ClassSymbol)]
         self._class_init = {}  # ClassSymbol -> etiqueta de su inicializador de campos (o None)
+        # Informacion para el backend, por etiqueta de funcion ('main' incluida):
+        self.frames: dict[str, ActivationRecord] = {}  # registro de activacion
+        self.function_symbols: dict[str, FunctionSymbol] = {}  # simbolo (None en main y __init)
+        self.names: dict[str, dict] = {"global": {}}  # area -> nombre en el TAC -> simbolo
 
     # ------------------------------------------------------------------
     # punto de entrada
@@ -55,7 +61,11 @@ class TACGenerator(ParseTreeVisitor):
         begin = self._emit(Quad(tac.FUNC_BEGIN, "main", "0"))
         self.visit(tree)
         self._emit(Quad(tac.FUNC_END, "main"))
-        begin.arg2 = str(main.temps.max_live * 8)
+        main_frame = ActivationRecord("main")
+        main_frame.temp_count = main.temps.max_live
+        begin.arg2 = str(main_frame.total_size)
+        self.frames["main"] = main_frame
+        self.function_symbols["main"] = None
         self._stack.pop()
 
         program = TACProgram()
@@ -106,6 +116,7 @@ class TACGenerator(ParseTreeVisitor):
                 suffix += 1
             used.add(name)
             self._names[key] = name
+            self.names.setdefault(area, {})[name] = symbol
         return self._names[key]
 
     def _binary(self, operator: str, left: str, right: str) -> str:
@@ -205,7 +216,7 @@ class TACGenerator(ParseTreeVisitor):
         self._place_label(end_label)
 
     def _loop_body(self, block, break_label: str, continue_label: str):
-        self._current.jumps.append((break_label, continue_label))
+        self._current.jumps.append((break_label, continue_label, self._current.try_depth))
         self.visit(block)
         self._current.jumps.pop()
 
@@ -247,11 +258,19 @@ class TACGenerator(ParseTreeVisitor):
         self._emit(Quad(tac.GOTO, result=start_label))
         self._place_label(end_label)
 
+    def _close_tries(self, depth: int):
+        """Quita los manejadores de los try que un salto abandona (los abiertos despues de `depth`)."""
+        for _ in range(self._current.try_depth - depth):
+            self._emit(Quad(tac.TRY_END))
+
     def visitBreakStatement(self, ctx: CompiscriptParser.BreakStatementContext):
-        self._emit(Quad(tac.GOTO, result=self._current.jumps[-1][0]))
+        target, _, depth = self._current.jumps[-1]
+        self._close_tries(depth)
+        self._emit(Quad(tac.GOTO, result=target))
 
     def visitContinueStatement(self, ctx: CompiscriptParser.ContinueStatementContext):
-        target = next(cont for _, cont in reversed(self._current.jumps) if cont is not None)
+        target, depth = next((cont, d) for _, cont, d in reversed(self._current.jumps) if cont is not None)
+        self._close_tries(depth)
         self._emit(Quad(tac.GOTO, result=target))
 
     def visitSwitchStatement(self, ctx: CompiscriptParser.SwitchStatementContext):
@@ -276,7 +295,7 @@ class TACGenerator(ParseTreeVisitor):
         self._release(value)
         self._emit(Quad(tac.GOTO, result=default_label or end_label))
 
-        self._current.jumps.append((end_label, None))
+        self._current.jumps.append((end_label, None, self._current.try_depth))
         for case, label in zip(cases, case_labels):
             self._place_label(label)
             for statement in case.statement():
@@ -304,6 +323,8 @@ class TACGenerator(ParseTreeVisitor):
 
         frame.temp_count = function.temps.max_live
         begin.arg2 = str(frame.total_size)
+        self.frames[label] = frame
+        self.function_symbols[label] = symbol
         self._stack.pop()
         self.functions.append(function)
 
@@ -319,10 +340,12 @@ class TACGenerator(ParseTreeVisitor):
 
     def visitReturnStatement(self, ctx: CompiscriptParser.ReturnStatementContext):
         if ctx.expression() is None:
+            self._close_tries(0)
             self._emit(Quad(tac.RETURN))
             return
         value = self.visit(ctx.expression())
         self._release(value)
+        self._close_tries(0)
         self._emit(Quad(tac.RETURN, value))
 
     # ------------------------------------------------------------------
@@ -416,7 +439,7 @@ class TACGenerator(ParseTreeVisitor):
             self._emit(Quad(tac.PARAM, value))
         self._release(receiver, target, *values)
         result = self._new_temp() if returns_value else None
-        self._emit(Quad(tac.CALL, target, str(len(values) + 1), result))
+        self._emit(Quad(tac.CALL, target, str(len(values) + 1), result, type=method.return_type))
         return result
 
     # ------------------------------------------------------------------
@@ -426,7 +449,7 @@ class TACGenerator(ParseTreeVisitor):
     def visitArrayLiteral(self, ctx: CompiscriptParser.ArrayLiteralContext):
         elements = ctx.expression()
         array = self._new_temp()
-        self._emit(Quad(tac.NEW_ARRAY, str(len(elements)), result=array))
+        self._emit(Quad(tac.NEW_ARRAY, str(len(elements)), result=array, type=self.analyzer.types.get(ctx)))
         for i, element in enumerate(elements):
             value = self.visit(element)
             self._release(value)
@@ -459,7 +482,9 @@ class TACGenerator(ParseTreeVisitor):
         """try_begin registra el manejador; un error en tiempo de ejecucion salta a su etiqueta."""
         catch_label, end_label = self._label(), self._label()
         self._emit(Quad(tac.TRY_BEGIN, result=catch_label))
+        self._current.try_depth += 1
         self.visit(ctx.block(0))
+        self._current.try_depth -= 1
         self._emit(Quad(tac.TRY_END))
         self._emit(Quad(tac.GOTO, result=end_label))
         self._place_label(catch_label)
