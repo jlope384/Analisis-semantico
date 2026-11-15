@@ -150,7 +150,7 @@ documentado en [`CODEGEN.md`](CODEGEN.md).
 `compile_source(fuente)` corre lexer → parser → `SemanticAnalyzer` →
 `TACGenerator` → `MIPSGenerator` y devuelve un `CompileResult` (árbol,
 errores, analizador, TAC, MIPS). El TAC y el MIPS solo se generan si no
-hubo errores; una construcción que el backend no soporta (closures) se
+hubo errores; una construcción que el backend no sabe traducir se
 reporta como error de generación de código. `describe_memory` arma el
 reporte de la tabla de símbolos con direcciones. Tanto `Driver.py` como
 los tests usan este módulo.

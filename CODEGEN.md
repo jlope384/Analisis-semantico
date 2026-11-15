@@ -72,7 +72,9 @@ sabe la dirección y el tipo de cada operando sin volver a recorrer el árbol.
 
 Los argumentos se pasan **por la pila**, una palabra cada uno, en el orden
 del `param`. El resultado vuelve en `$v0` (o en `$f0` si es `float`). Un
-método recibe `this` como primer argumento.
+método recibe `this` como primer argumento. Una **función anidada** recibe
+además un *enlace de acceso* (access link, o enlace estático), que es la
+última palabra que se apila (ver §3.1).
 
 **Llamador** (`param x` … `call f, n`):
 
@@ -80,8 +82,10 @@ método recibe `this` como primer argumento.
         addiu $sp, $sp, -4        # param x  (uno por argumento)
         sw    $t0, 0($sp)
         ...                       # se guardan en memoria los valores vivos en $t
+        addiu $sp, $sp, -4        # solo si f es anidada: enlace de acceso
+        sw    $fp, 0($sp)         #   ($fp o $k1, ver §3.1)
         jal   fn_f                # (o jalr $v1 en una llamada por la vtable)
-        addiu $sp, $sp, 4n        # quita los argumentos
+        addiu $sp, $sp, 4n        # quita los argumentos (4(n+1) con enlace)
         move  $t0, $v0            # resultado
 ```
 
@@ -93,8 +97,10 @@ fn_f:   addiu $sp, $sp, -F
         sw    $fp, F-8($sp)
         sw    $s0, k($sp)         # solo los $s que la función usa
         move  $fp, $sp
-        lw    $a2, F+4(n-1-i)($fp)  # copia el argumento i a su lugar
-        sw    $a2, offset_i($fp)    # en el registro de activación
+        lw    $a2, F($fp)         # solo si f es anidada: guarda el enlace
+        sw    $a2, A($fp)         #   en su lugar fijo (A = tamaño del registro)
+        lw    $a2, F+e+4(n-1-i)($fp)  # copia el argumento i a su lugar
+        sw    $a2, offset_i($fp)      # en el registro de activación (e = 4 si hay enlace)
         ...
 ret_fn_f:
         lw    $s0, k($fp)
@@ -108,17 +114,85 @@ ret_fn_f:
 Marco resultante, desde `$fp` hacia direcciones altas:
 
 ```
- 0($fp)                                     F($fp)
- ┌──────────────────────────────┬───────────┬────────┬─────┬───────────────────────┐
- │ registro de activación (TAC) │ $s usados │ $fp ant│ $ra │ argumentos (llamador) │
- │ params | locales | temporales│           │        │     │ arg n-1 ... arg 0     │
- └──────────────────────────────┴───────────┴────────┴─────┴───────────────────────┘
+ 0($fp)                         A($fp)                                F($fp)
+ ┌──────────────────────────────┬────────┬───────────┬────────┬─────┬─────────┬───────────────────┐
+ │ registro de activación (TAC) │ enlace │ $s usados │ $fp ant│ $ra │ enlace  │ argumentos        │
+ │ params | locales | temporales│ (copia)│           │        │     │(apilado)│ arg n-1 ... arg 0 │
+ └──────────────────────────────┴────────┴───────────┴────────┴─────┴─────────┴───────────────────┘
 ```
+
+Las dos casillas de `enlace` solo existen en funciones anidadas. `A` es el
+tamaño del registro de activación que calculó el TAC (`begin_func f, A`).
 
 Todo acceso a variables es relativo a `$fp`, así que apilar argumentos
 (`$sp` cambia) o hacer spill en medio de una llamada no altera ninguna
 dirección. `return x` deja el valor en `$v0`/`$f0` y salta al epílogo.
 Al terminar, `main` hace `syscall 10`.
+
+### 3.1 Funciones anidadas: enlace de acceso
+
+Una función declarada dentro de otra puede leer y escribir las variables
+de la función que la contiene (closures a nivel estático). Esas variables
+viven en el marco de la función externa, así que la interna necesita
+llegar a él en tiempo de ejecución. Para eso cada función anidada recibe
+el `$fp` del marco de la función que la contiene: su **enlace de acceso**.
+
+La **profundidad de anidamiento** sale de la tabla de símbolos:
+`FunctionSymbol.enclosing_function` es el dueño del scope `FUNCTION` más
+cercano por encima del scope de la función, y `nesting_depth` cuenta esos
+niveles (0 para funciones de nivel superior y métodos).
+
+**Enlace que pasa el llamador.** Para llamar a `g` (profundidad `d_g`)
+desde `c` (profundidad `d_c`) se suben `d_c − d_g + 1` niveles:
+
+| Caso | Saltos | Enlace apilado |
+|---|---|---|
+| `f` llama a su función interna `g` | 0 | `$fp` |
+| `g` se llama a sí misma (recursión) o a una hermana | 1 | el enlace de `g` |
+| `h`, interna de `g`, llama a `g` | 2 | el enlace del enlace |
+
+**Dónde se guarda.** El llamador lo apila después de los argumentos, así
+que el llamado lo encuentra en `F($fp)`. El prólogo lo copia a `A($fp)`,
+justo después del registro de activación. Como `A` sale del TAC (no
+depende de los `$s` que use la función), cualquier función más interna
+conoce ese offset de antemano.
+
+**Acceso a una variable no local.** Si la variable `x` (offset `k`) está
+en el marco de una función `n` niveles hacia afuera, se sigue la cadena
+en `$k1`:
+
+```mips
+        lw    $k1, A_g($fp)       # enlace de g: marco de f
+        lw    $k1, A_f($k1)       # (un lw más por cada nivel adicional)
+        lw    $s0, k($k1)         # x
+```
+
+Ejemplo (dos niveles):
+
+```
+function a(): integer {
+  let x: integer = 1;
+  function b(): integer {
+    function c(): integer { return x; }   // x está 2 niveles afuera
+    return c();                           // b llama a su interna: apila $fp
+  }
+  return b();                             // a llama a su interna: apila $fp
+}
+```
+
+**Registros.** Una llamada puede cambiar una variable que se comparte
+entre funciones anidadas, así que esas variables se tratan como las
+globales: se guardan en memoria antes de cada `jal` y se vuelven a cargar
+después. Esto vale para las variables no locales dentro de la función
+interna y para las locales de la función externa que alguna función
+anidada usa (`MIPSGenerator._find_captured`). Las demás locales siguen en
+`$s` a través de las llamadas.
+
+**Nombres en el TAC.** Cada variable se nombra en el área de la función que
+la declara, aunque la primera referencia aparezca en una función interna,
+y un nombre local no se repite en la cadena de funciones anidadas
+(`x`, `x_1`, …). Así el backend nunca confunde una variable externa con
+una local que la oculta.
 
 ## 4. Asignación de registros (`getReg`)
 
@@ -131,6 +205,7 @@ Al terminar, `main` hace `syscall 10`.
 | `$f4–$f11`, `$f16–$f19` | temporales `float` | llamador |
 | `$f20–$f31` | variables `float` | llamado |
 | `$a0–$a3`, `$v0`, `$v1`, `$f0–$f3`, `$f12` | scratch: literales, argumentos de syscall y del runtime, resultados | — |
+| `$k1` | recorrido de la cadena de enlaces de acceso | — |
 | `$gp`, `$sp`, `$fp`, `$ra` | globales, pila, marco, retorno | — |
 
 `$at` queda libre para las pseudo-instrucciones del ensamblador.
@@ -178,7 +253,7 @@ los registros de temporales muertos.
 | Punto | Acción |
 |---|---|
 | Fin de bloque básico | Guarda los valores sucios que siguen vivos y vacía los descriptores. |
-| Antes de `jal`/`jalr` | Guarda los valores sucios vivos, olvida `$t`/`$f` temporales y globales (el llamado puede cambiarlos) y conserva las locales en `$s`. |
+| Antes de `jal`/`jalr` | Guarda los valores sucios vivos, olvida `$t`/`$f` temporales, globales y variables compartidas con funciones anidadas (el llamado puede cambiarlos) y conserva las demás locales en `$s`. |
 | Antes de una instrucción que puede lanzar un error, en una función con `try` | Guarda los valores sucios vivos, porque el `catch` los lee de memoria. |
 
 Ejemplo (`fact`): `n` queda en `$s0` durante la llamada recursiva y no se
@@ -213,7 +288,7 @@ vuelve a cargar, porque el llamado preserva `$s0`.
 | `x = new_array n` | `sbrk(4 + 4n)` y la longitud en el offset 0 |
 | `x = a[i]`, `a[i] = x` | chequeo de null y de límites, `lw`/`sw 4+4i(a)` |
 | `x = o.f`, `o.f = x` | chequeo de null, `lw`/`sw offset_f(o)` |
-| `x = o.vtable`; `x = x[k]`; `call x, n` | `lw x, 0(o)`; `lw x, 4k(x)`; `jalr` |
+| `x = o.vtable`; `x = x[k]`; `call x, n` | chequeo de null, `lw x, 0(o)`; `lw x, 4k(x)`; `jalr` |
 | `x = len a` | `lw x, 0(a)` |
 | `print x` | syscall 1 (integer), 2 (float), `__print_str`, `__print_bool`, y un salto de línea |
 | `try_begin L` / `try_end` | apila/desapila `(L, $sp, $fp)` en la pila de manejadores |
@@ -224,7 +299,7 @@ vuelve a cargar, porque el llamado preserva `$s0`.
 El runtime mantiene una **pila de manejadores** (`__handlers`, hasta 64
 `try` anidados). `try_begin L` apila la dirección del catch con los `$sp` y
 `$fp` de ese momento. Un error (índice fuera de rango, acceso a null,
-división entre cero) llama a `__raise` con su mensaje:
+división entre cero, llamar un método sobre null) llama a `__raise` con su mensaje:
 
 - Si hay manejador, lo desapila, restaura `$sp` y `$fp` (esto descarta los
   marcos de las funciones que se llamaron dentro del try), guarda el mensaje
@@ -259,8 +334,10 @@ docker run --rm -v "$(pwd)/program":/program csp-image pytest
 | Archivo | Qué prueba |
 |---|---|
 | `tests/test_liveness.py` | bloques básicos, sucesores, vida de temporales, siguiente uso, flujo hacia el catch |
-| `tests/test_mips_codegen.py` | prólogo/epílogo, paso de argumentos, $s guardados, vtable, clases de registros, reutilización de registros, spill bajo presión, floats, errores (closures, programas inválidos) |
-| `tests/test_mips_execution.py` | **se compila y ejecuta en MARS**: aritmética, floats, lógicos con cortocircuito, ternario, strings, bucles, switch, recursión, más de 4 argumentos, llamadas anidadas, valores que sobreviven a llamadas, globales, presión de registros (spill), clases con herencia y despacho dinámico, arreglos, ordenamiento, try/catch (también a través de funciones), errores no capturados |
+| `tests/test_mips_codegen.py` | prólogo/epílogo, paso de argumentos, $s guardados, vtable, clases de registros, reutilización de registros, spill bajo presión, floats, **enlace de acceso** (se apila `$fp`, se guarda en el prólogo, cadena de 1 y 2 niveles, recursión, recarga de variables capturadas), programas inválidos |
+| `tests/test_mips_execution.py` | **se compila y ejecuta en MARS**: aritmética, floats, lógicos con cortocircuito, ternario, strings, bucles, switch, recursión, más de 4 argumentos, llamadas anidadas, valores que sobreviven a llamadas, globales, **closures** (lectura y escritura de variables externas, 2 y 3 niveles, recursión y funciones hermanas anidadas, ocultamiento), clases con herencia y despacho dinámico, arreglos, ordenamiento, try/catch (también a través de funciones), errores no capturados, **presión de registros** (spill y restauración en llamadas anidadas, bucles, recursión y floats) |
+| `tests/test_mips_failures.py` | casos fallidos: programas con errores semánticos que no generan TAC ni MIPS; errores en MARS sin manejador (índice fuera de rango, división y módulo entre cero, acceso a null en campos, métodos y arreglos, propagados desde funciones o closures, dentro de un catch, después de cerrar un try), con su mensaje y el código de salida 1 |
+| `tests/test_examples.py` | compila cada `examples/*.cps`, lo ejecuta en MARS y compara con su `.out` (y el código de salida) |
 
 Los tests que ejecutan MARS se saltan automáticamente si el simulador no
 está instalado (por ejemplo, al correr `pytest` fuera de Docker). Para
@@ -269,10 +346,10 @@ ten `java` en el `PATH`.
 
 ## 8. Supuestos y limitaciones
 
-1. **Closures.** Una función anidada que lee variables locales de la función
-   que la contiene no se puede traducir (haría falta un *access link*). El
-   compilador lo reporta como error de generación de código. Las funciones
-   anidadas que solo usan sus propias variables y las globales sí funcionan.
+1. **Funciones anidadas** se resuelven con alcance estático (enlace de
+   acceso). Compiscript no tiene funciones como valores, así que una función
+   interna nunca sobrevive a la externa y su marco siempre está en la pila.
+   `$k1` queda reservado para recorrer la cadena de enlaces.
 2. **Float en precisión simple** (`.s`). MARS imprime el valor con la
    representación de Java (`4.0`, `2.5`).
 3. **Strings inmutables.** Cada concatenación reserva memoria nueva, y el

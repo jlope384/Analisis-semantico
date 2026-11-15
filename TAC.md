@@ -386,7 +386,8 @@ L2:
    copia es la referencia.
 8. **Funciones anidadas.** Reciben una etiqueta calificada
    (`externa.interna`) y su propio registro de activación. El acceso a
-   variables de la función externa se representa por su nombre, y se
-   asume un enlace de acceso (*access link*) en tiempo de ejecución.
+   variables de la función externa se representa por su nombre; el
+   backend lo resuelve con un enlace de acceso (*access link*) en tiempo
+   de ejecución (ver [CODEGEN.md §3.1](CODEGEN.md)).
 9. **`switch`** tiene fall-through entre casos (supuesto, el enunciado no
    lo define).
