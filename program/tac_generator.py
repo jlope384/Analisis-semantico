@@ -106,18 +106,34 @@ class TACGenerator(ParseTreeVisitor):
         """Nombre del simbolo en el TAC; se desambiguan variables que se ocultan entre si."""
         key = id(symbol)
         if key not in self._names:
-            area = "global" if symbol.storage == "global" else self._current.label
+            area = "global" if symbol.storage == "global" else self._owner_area(symbol)
             used = self._used_names.setdefault(area, set())
             global_used = self._used_names.setdefault("global", set())
+            # Una funcion anidada ve las variables de las funciones que la contienen
+            # (closures): un nombre local no se repite en esa cadena de funciones.
+            chain_used = set()
+            if area != "global":
+                for context in self._stack:
+                    chain_used |= self._used_names.get(context.label, set())
             name = symbol.name
             suffix = 1
-            while name in used or (area != "global" and name in global_used):
+            while name in used or (area != "global" and (name in global_used or name in chain_used)):
                 name = f"{symbol.name}_{suffix}"
                 suffix += 1
             used.add(name)
             self._names[key] = name
             self.names.setdefault(area, {})[name] = symbol
         return self._names[key]
+
+    def _owner_area(self, symbol) -> str:
+        """Etiqueta de la funcion cuyo registro de activacion contiene a `symbol`. Una
+        funcion anidada puede nombrar primero una variable de la funcion externa
+        (p.ej. una declarada sin inicializar), y el nombre debe quedar en el area de esta."""
+        for context in reversed(self._stack):
+            frame = context.symbol.frame if context.symbol is not None else None
+            if frame is not None and any(s is symbol for s in frame.symbols):
+                return context.label
+        return self._current.label
 
     def _binary(self, operator: str, left: str, right: str) -> str:
         self._release(left, right)

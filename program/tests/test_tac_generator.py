@@ -601,3 +601,43 @@ def test_generator_exposes_frames_and_names_for_the_backend():
     assert set(generator.names["global"]) == {"g", "xs"}
     new_array = next(q for q in program if q.op == "new_array")
     assert new_array.type.name == "integer[]"
+
+
+def _nested_names(source: str):
+    parser = CompiscriptParser(CommonTokenStream(CompiscriptLexer(InputStream(source))))
+    tree = parser.program()
+    analyzer = SemanticAnalyzer()
+    ParseTreeWalker.DEFAULT.walk(analyzer, tree)
+    assert analyzer.errors == []
+    generator = TACGenerator(analyzer)
+    generator.generate(tree)
+    return generator.names
+
+
+def test_outer_variable_first_named_inside_nested_function_belongs_to_outer_area():
+    names = _nested_names("""
+        function f(): integer {
+          let late: integer;
+          function g() { late = 7; }
+          g();
+          return late;
+        }
+    """)
+    assert "late" in names["f"]
+    assert "late" not in names.get("f.g", {})
+
+
+def test_nested_local_does_not_reuse_a_name_of_the_enclosing_function():
+    names = _nested_names("""
+        function f(): integer {
+          let x: integer = 1;
+          function g(): integer {
+            let y: integer = x;
+            if (true) { let x: integer = 2; y = y + x; }
+            return y;
+          }
+          return g();
+        }
+    """)
+    assert "x" in names["f"]
+    assert "x" not in names["f.g"] and "x_1" in names["f.g"]
