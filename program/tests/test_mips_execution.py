@@ -508,3 +508,116 @@ def test_virtual_call_on_null_is_a_runtime_error_that_can_be_caught():
     lines = [l.strip() for l in execution.output.splitlines() if l.strip()]
     assert lines == ["acceso a una referencia null",
                      "Error en tiempo de ejecucion: acceso a una referencia null"]
+
+
+# --- presion de registros: spill y restauracion -----------------------------------
+
+def _wrap32(value: int) -> int:
+    return (value + 2**31) % 2**32 - 2**31
+
+
+def _right_nested(terms: list[str], last: str) -> str:
+    """t0 + (t1 + (t2 + ... + last)): todos los terminos de la izquierda quedan vivos."""
+    expression = last
+    for term in reversed(terms):
+        expression = f"({term} + {expression})"
+    return expression
+
+
+def output_and_asm(source: str):
+    result = compile_source(source)
+    assert result.errors == []
+    execution = simulator.run_mips(result.mips)
+    assert execution.exit_code == 0, execution.output
+    return [l.strip() for l in execution.output.splitlines() if l.strip()], result.mips
+
+
+def test_live_temporaries_survive_nested_calls_under_register_pressure():
+    count = 14  # mas valores vivos que registros $t (10) y $s (8)
+    decls = " ".join(f"let v{i}: integer = {i + 1};" for i in range(count))
+    terms = [f"v{i} * {i + 2}" for i in range(count)]
+    inner = "add3(v3 * v4, mul2(v5 + v6, add3(v7, v8 * v9, v10)), v11 - v12)"
+    source = f"""
+        function add3(a: integer, b: integer, c: integer): integer {{ return a + b + c; }}
+        function mul2(a: integer, b: integer): integer {{ return a * b; }}
+        function run(): integer {{
+          {decls}
+          let r: integer = {_right_nested(terms, inner)};
+          print({' + '.join(f'v{i}' for i in range(count))});
+          return r;
+        }}
+        print(run());
+    """
+    v = [i + 1 for i in range(count)]
+    inner_value = (v[3] * v[4]) + (v[5] + v[6]) * (v[7] + v[8] * v[9] + v[10]) + (v[11] - v[12])
+    expected = sum(v[i] * (i + 2) for i in range(count)) + inner_value
+    lines, asm = output_and_asm(source)
+    assert "# spill" in asm
+    assert lines == [str(sum(v)), str(expected)]
+
+
+def test_loop_with_more_variables_than_saved_registers_and_calls():
+    count, iterations = 12, 5
+    decls = " ".join(f"let a{i}: integer = {i};" for i in range(count))
+    updates = " ".join(
+        f"a{i} = a{i} + step(a{(i + 1) % count}, {'i' if i == count - 1 else f'a{(i + 2) % count}'});"
+        for i in range(count)
+    )
+    source = f"""
+        function step(x: integer, y: integer): integer {{ return x * 2 - y; }}
+        function run(n: integer): integer {{
+          {decls}
+          let i: integer = 0;
+          while (i < n) {{ {updates} i = i + 1; }}
+          return {' + '.join(f'a{i}' for i in range(count))};
+        }}
+        print(run({iterations}));
+    """
+    a = list(range(count))
+    for i in range(iterations):
+        for k in range(count):
+            y = i if k == count - 1 else a[(k + 2) % count]
+            a[k] = _wrap32(a[k] + a[(k + 1) % count] * 2 - y)
+    lines, asm = output_and_asm(source)
+    assert "# spill" in asm
+    assert lines == [str(_wrap32(sum(a)))]
+
+
+def test_recursion_with_many_live_values_restores_each_frame():
+    count = 11
+    decls = " ".join(f"let x{i}: integer = n * {i + 1};" for i in range(count))
+    terms = [f"x{i}" for i in range(count)]
+    source = f"""
+        function deep(n: integer): integer {{
+          if (n == 0) {{ return 0; }}
+          {decls}
+          return {_right_nested(terms, "deep(n - 1)")};
+        }}
+        print(deep(6));
+    """
+
+    def deep(n):
+        return 0 if n == 0 else sum(n * (i + 1) for i in range(count)) + deep(n - 1)
+
+    lines, asm = output_and_asm(source)
+    assert "# spill" in asm
+    assert lines == [str(deep(6))]
+
+
+def test_float_values_survive_calls_under_register_pressure():
+    count = 14  # mas que los 12 registros $f temporales y los 12 $f20-$f31
+    decls = " ".join(f"let f{i}: float = {i}.5;" for i in range(count))
+    terms = [f"f{i} * {i + 1}" for i in range(count)]
+    source = f"""
+        function half(x: float): float {{ return x / 2; }}
+        function run(): float {{
+          {decls}
+          return {_right_nested(terms, "half(f0 + f13)")};
+        }}
+        print(run());
+    """
+    f = [i + 0.5 for i in range(count)]
+    expected = sum(f[i] * (i + 1) for i in range(count)) + (f[0] + f[13]) / 2
+    lines, asm = output_and_asm(source)
+    assert "# spill" in asm
+    assert lines == [repr(expected)]
