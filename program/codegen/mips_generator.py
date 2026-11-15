@@ -628,6 +628,9 @@ class MIPSGenerator:
     def _t_load_field(self, quad):
         obj = self._read(quad.arg1, "$a2")
         if quad.arg2 == "vtable":
+            # llamar un metodo sobre null es un error en tiempo de ejecucion, no un fallo de MARS
+            self._guard()
+            self._emit(f"beqz  {obj}, __err_null")
             dst = self._write(quad.result, VTABLE)
             self._emit(f"lw    {dst}, 0({obj})")
             return

@@ -493,3 +493,18 @@ def test_sample_program_runs():
         assert output_of(f.read()) == [
             "Hola Mundo", "Toby ladra.", "90", "85", "100", "90", "85", "120",
         ]
+
+
+def test_virtual_call_on_null_is_a_runtime_error_that_can_be_caught():
+    execution = run("""
+        class A { function f(): integer { return 1; } }
+        class B : A { function f(): integer { return 2; } }
+        let a: A = null;
+        try { print(a.f()); } catch (e) { print(e); }
+        print(a.f());
+        print("despues");
+    """)
+    assert execution.exit_code == 1
+    lines = [l.strip() for l in execution.output.splitlines() if l.strip()]
+    assert lines == ["acceso a una referencia null",
+                     "Error en tiempo de ejecucion: acceso a una referencia null"]
