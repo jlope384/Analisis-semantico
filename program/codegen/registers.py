@@ -46,17 +46,19 @@ CALLEE_SAVED = INT_SAVED + FLOAT_SAVED
 
 
 class RegisterAllocator:
-    def __init__(self, flow: FunctionFlow, home, is_float, is_global, emit):
+    def __init__(self, flow: FunctionFlow, home, is_float, is_shared, emit):
         """
         flow:      bloques y siguiente uso de la funcion.
         home(x):   lugar de x en memoria, p.ej. '12($fp)'.
-        is_float(x), is_global(x): clasifican un operando.
+        is_float(x):  si x va en un registro de punto flotante.
+        is_shared(x): si una llamada puede modificar x (globales y variables
+                      compartidas con funciones anidadas).
         emit(linea): agrega una instruccion MIPS.
         """
         self.flow = flow
         self.home = home
         self.is_float = is_float
-        self.is_global = is_global
+        self.is_shared = is_shared
         self.emit = emit
         self.registers: dict[str, str] = {}  # descriptor de registro: reg -> valor
         self.location: dict[str, str] = {}  # descriptor de direccion: valor -> reg
@@ -183,13 +185,14 @@ class RegisterAllocator:
         """Antes de `jal`: guarda los valores vivos y olvida los que la llamada puede cambiar.
 
         Los registros caller-saved ($t, $f4-$f19) los puede destruir la
-        funcion llamada. Las variables globales las puede modificar, asi que
-        tambien se recargan despues. Las locales en $s se quedan: el llamado
-        las preserva.
+        funcion llamada. Las variables globales y las que comparte con una
+        funcion anidada (closures) las puede modificar, asi que tambien se
+        recargan despues. Las demas locales en $s se quedan: el llamado las
+        preserva.
         """
         self._store_dirty(lambda v: self._next_use(v) is not None or not is_temp(v))
         for reg, value in list(self.registers.items()):
-            if reg in CALLER_SAVED or self.is_global(value):
+            if reg in CALLER_SAVED or self.is_shared(value):
                 del self.registers[reg]
                 del self.location[value]
 

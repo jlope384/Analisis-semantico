@@ -92,20 +92,107 @@ def test_float_values_use_floating_point_registers():
     assert "cvt.s.w" in asm  # el 2 se promueve a float
 
 
-# --- errores ------------------------------------------------------------------
+# --- funciones anidadas: enlace de acceso (access link) ------------------------
 
-def test_closure_over_outer_local_is_reported_as_codegen_error():
-    result = compile_source("""
-        function outer(): integer {
+CLOSURE = """
+    function outer(n: integer): integer {
+      let x: integer = 1;
+      function inner(k: integer): integer { x = x + k; return x + n; }
+      return inner(2);
+    }
+    print(outer(5));
+"""
+
+
+def lines_of(asm: str) -> list[str]:
+    return [l.strip() for l in asm.splitlines()]
+
+
+def test_call_to_nested_function_pushes_callers_fp_as_access_link():
+    code = function_code(mips(CLOSURE), "fn_outer")
+    call = code.index("jal   fn_outer__inner")
+    # el ultimo valor apilado antes del jal es el $fp del marco que contiene a inner
+    assert code[call - 2] == "addiu $sp, $sp, -4"
+    assert code[call - 1].startswith("sw    $fp, 0($sp)")
+    # se quitan el argumento y el enlace
+    assert code[call + 1] == "addiu $sp, $sp, 8"
+
+
+def test_top_level_call_does_not_push_an_access_link():
+    asm = mips("function f(a: integer): integer { return a; } print(f(1));")
+    assert "enlace de acceso" not in asm
+
+
+def test_nested_function_saves_its_access_link_and_reads_its_arguments_after_it():
+    code = function_code(mips(CLOSURE), "fn_outer__inner")
+    size = int(code[1].split("-")[-1])
+    link = code.index(f"lw    $a2, {size}($fp)   # enlace de acceso")
+    assert code[link + 1].startswith("sw    $a2, ")
+    # el unico argumento queda justo encima del enlace
+    assert f"lw    $a2, {size + 4}($fp)   # argumento k" in code
+
+
+def test_nonlocal_variable_is_reached_through_the_access_link():
+    code = function_code(mips(CLOSURE), "fn_outer__inner")
+    body = "\n".join(code)
+    assert "lw    $k1, " in body and "# enlace de acceso" in body
+    # x (offset 4 en outer) y n (offset 0) se leen y escriben a partir de $k1
+    assert any(l.endswith(", 4($k1)") and l.startswith("lw") for l in code)
+    assert any(l.endswith(", 4($k1)") and l.startswith("sw") for l in code)
+    assert any(l.endswith(", 0($k1)") for l in code)
+
+
+def test_two_levels_follow_the_chain_twice():
+    code = function_code(mips("""
+        function a(): integer {
           let x: integer = 1;
-          function inner(): integer { return x + 1; }
-          return inner();
+          function b(): integer {
+            function c(): integer { return x; }
+            return c();
+          }
+          return b();
+        }
+        print(a());
+    """), "fn_a__b__c")
+    chain = [l for l in code if l.startswith("lw    $k1, ")]
+    assert chain[0].endswith("($fp)   # enlace de acceso")
+    assert chain[1].endswith("($k1)")
+
+
+def test_recursive_nested_call_passes_its_own_access_link():
+    code = function_code(mips("""
+        function outer(): integer {
+          let base: integer = 1;
+          function fact(n: integer): integer {
+            if (n <= 1) { return base; }
+            return n * fact(n - 1);
+          }
+          return fact(4);
         }
         print(outer());
-    """)
-    assert result.mips is None
-    assert any("closures" in e for e in result.errors)
+    """), "fn_outer__fact")
+    call = code.index("jal   fn_outer__fact")
+    # fact esta a la misma profundidad que si misma: se pasa su propio enlace (1 salto)
+    assert code[call - 3].startswith("lw    $k1, ") and code[call - 3].endswith("($fp)   # enlace de acceso")
+    assert code[call - 1].startswith("sw    $k1, 0($sp)")
 
+
+def test_captured_variable_is_reloaded_after_calling_the_nested_function():
+    code = function_code(mips("""
+        function outer(): integer {
+          let x: integer = 1;
+          function bump() { x = x + 1; }
+          bump();
+          return x;
+        }
+        print(outer());
+    """), "fn_outer")
+    call = code.index("jal   fn_outer__bump")
+    # x no se queda en un $s a traves de la llamada: se vuelve a leer de memoria
+    assert any(l.startswith("lw    $s") and l.endswith("4($fp)") for l in code[call:])
+
+
+# --- errores ------------------------------------------------------------------
 
 def test_program_with_semantic_errors_produces_no_mips():
     result = compile_source('let a: integer = "hola";')

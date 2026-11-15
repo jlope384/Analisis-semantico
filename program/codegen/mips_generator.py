@@ -102,6 +102,67 @@ class MIPSGenerator:
         self.strings: dict[str, str] = {}  # literal -> etiqueta en .data
         self.floats: dict[str, str] = {}
         self._local_labels = 0
+        # funcion (etiqueta) cuyo registro de activacion contiene a cada variable
+        self.owner = {id(s): label for label, frame in self.frames.items() for s in frame.symbols}
+        # variables locales que lee o escribe una funcion anidada (ver _find_captured)
+        self.captured: set[int] = set()
+
+    # --- anidamiento y enlaces de acceso (access links) ------------------------
+
+    def _enclosing(self, label: str):
+        """Etiqueta de la funcion que contiene a `label` (None si no es anidada)."""
+        symbol = self.function_symbols.get(label)
+        outer = symbol.enclosing_function if symbol is not None else None
+        return outer.label if outer is not None else None
+
+    def _depth(self, label: str) -> int:
+        symbol = self.function_symbols.get(label)
+        return symbol.nesting_depth if symbol is not None else 0
+
+    def _has_link(self, label: str) -> bool:
+        """Una funcion anidada recibe un enlace de acceso al marco de la que la contiene."""
+        return self._enclosing(label) is not None
+
+    def _link_offset(self, label: str) -> int:
+        """Offset (desde $fp) donde la funcion guarda su enlace de acceso: justo despues
+        de su registro de activacion, que el TAC ya dimensiono."""
+        return self.frames[label].total_size
+
+    def _load_link(self, hops: int) -> str:
+        """Deja en $k1 el $fp del marco `hops` niveles hacia afuera siguiendo la cadena de enlaces."""
+        label = self.label
+        self._emit(f"lw    $k1, {self._link_offset(label)}($fp)   # enlace de acceso")
+        for _ in range(hops - 1):
+            label = self._enclosing(label)
+            self._emit(f"lw    $k1, {self._link_offset(label)}($k1)")
+        return "$k1"
+
+    def _hops(self, symbol) -> int:
+        """Niveles que hay que subir por la cadena de enlaces para llegar al marco de `symbol`
+        (0 si es de la funcion actual)."""
+        owner = self.owner.get(id(symbol), self.label)
+        if owner == self.label:
+            return 0
+        hops, label = 0, self.label
+        while label is not None and label != owner:
+            label = self._enclosing(label)
+            hops += 1
+        if label is None:
+            raise CodeGenError(f"'{symbol.name}' no pertenece a una funcion que contenga a {self.label}")
+        return hops
+
+    def _find_captured(self, functions):
+        """Marca las variables locales que usa una funcion anidada: una llamada puede
+        cambiarlas, asi que no se pueden mantener en un registro a traves de ella."""
+        for label, code in functions:
+            for quad in code:
+                for operand in (quad.arg1, quad.arg2, quad.result):
+                    if not isinstance(operand, str) or is_temp(operand) or literal_type(operand):
+                        continue
+                    symbol = self._lookup(label, operand)
+                    if symbol is not None and symbol.storage != "global" \
+                            and self.owner.get(id(symbol), label) != label:
+                        self.captured.add(id(symbol))
 
     # ------------------------------------------------------------------
     # programa completo
@@ -120,6 +181,7 @@ class MIPSGenerator:
 
         # main va primero: MARS empieza a ejecutar en la primera instruccion de .text
         functions.sort(key=lambda f: f[0] != "main")
+        self._find_captured(functions)
         text = []
         for label, code in functions:
             text += self._function(label, code)
@@ -147,14 +209,13 @@ class MIPSGenerator:
         self.label = label
         self.frame = self.frames[label]
         self.symbol = self.function_symbols.get(label)
-        self.frame_ids = {id(s) for s in self.frame.symbols}
         self.temp_types: dict[str, Type] = {}
         self.code = code
         self.flow = FunctionFlow(code)
         self.has_try = any(q.op == tac.TRY_BEGIN for q in code)
         self.exit_label = "__main_exit" if label == "main" else f"ret_{function_label(label)}"
         self.body: list[str] = []
-        self.alloc = RegisterAllocator(self.flow, self._home, self._is_float, self._is_global, self._emit)
+        self.alloc = RegisterAllocator(self.flow, self._home, self._is_float, self._is_shared, self._emit)
         self.call_of_param = self._match_params(code)
 
         for i, quad in enumerate(code):
@@ -184,8 +245,12 @@ class MIPSGenerator:
                     matches[i - count + position] = (quad, position)
         return matches
 
+    def _saved_base(self) -> int:
+        """Offset del area de $s guardados: despues del registro de activacion y del enlace."""
+        return self.frame.total_size + (4 if self._has_link(self.label) else 0)
+
     def _frame_size(self) -> int:
-        size = self.frame.total_size + 4 * len(self._saved_registers()) + 8
+        size = self._saved_base() + 4 * len(self._saved_registers()) + 8
         return (size + 7) // 8 * 8
 
     def _saved_registers(self) -> list[str]:
@@ -200,16 +265,21 @@ class MIPSGenerator:
                 f"        addiu $sp, $sp, -{max(self.frame.total_size, 4)}",
                 "        move  $fp, $sp",
             ]
-        size, base = self._frame_size(), self.frame.total_size
+        size, base = self._frame_size(), self._saved_base()
         lines = [f"{name}:", f"        addiu $sp, $sp, -{size}",
                  f"        sw    $ra, {size - 4}($sp)", f"        sw    $fp, {size - 8}($sp)"]
         for j, reg in enumerate(self._saved_registers()):
             store = "swc1" if reg.startswith("$f") else "sw"
             lines.append(f"        {store:<5} {reg}, {base + 4 * j}($sp)")
         lines.append("        move  $fp, $sp")
+        # el enlace de acceso es lo ultimo que apila el llamador: queda en F($fp)
+        link = 4 if self._has_link(self.label) else 0
+        if link:
+            lines.append(f"        lw    $a2, {size}($fp)   # enlace de acceso")
+            lines.append(f"        sw    $a2, {self._link_offset(self.label)}($fp)")
         params = self.frame.params
         for i, param in enumerate(params):
-            incoming = size + 4 * (len(params) - 1 - i)
+            incoming = size + link + 4 * (len(params) - 1 - i)
             lines.append(f"        lw    $a2, {incoming}($fp)   # argumento {param.name}")
             lines.append(f"        sw    $a2, {param.offset}($fp)")
         return lines
@@ -217,7 +287,7 @@ class MIPSGenerator:
     def _epilogue(self) -> list[str]:
         if self.label == "main":
             return ["__main_exit:", "        li    $v0, 10", "        syscall", ""]
-        size, base = self._frame_size(), self.frame.total_size
+        size, base = self._frame_size(), self._saved_base()
         lines = [f"{self.exit_label}:"]
         for j, reg in enumerate(self._saved_registers()):
             load = "lwc1" if reg.startswith("$f") else "lw"
@@ -249,31 +319,42 @@ class MIPSGenerator:
             if not isinstance(this, ThisSlot):
                 raise CodeGenError(f"'this' fuera de un metodo en {self.label}")
             return this
-        symbol = self.names.get(self.label, {}).get(operand) or self.names["global"].get(operand)
-        if symbol is None:
-            # Una variable de la funcion que contiene a esta (funciones anidadas).
-            outer = self.label.rsplit(".", 1)[0] if "." in self.label else None
-            while outer is not None and symbol is None:
-                symbol = self.names.get(outer, {}).get(operand)
-                outer = outer.rsplit(".", 1)[0] if "." in outer else None
+        symbol = self._lookup(self.label, operand)
         if symbol is None:
             raise CodeGenError(f"operando desconocido '{operand}' en {self.label}")
-        if symbol.storage != "global" and id(symbol) not in self.frame_ids:
-            raise CodeGenError(
-                f"'{operand}' es una variable de una funcion externa; "
-                f"el backend no soporta closures (en {self.label})"
-            )
         return symbol
+
+    def _lookup(self, label: str, operand: str):
+        """Simbolo de `operand` visto desde la funcion `label`: primero sus propios nombres,
+        luego los de las funciones que la contienen (closures) y al final los globales."""
+        current = label
+        while current is not None:
+            symbol = self.names.get(current, {}).get(operand)
+            if symbol is not None:
+                return symbol
+            current = self._enclosing(current)
+        return self.names["global"].get(operand)
 
     def _home(self, operand: str) -> str:
         if is_temp(operand):
             return f"{self.frame.size + 8 * (int(operand[1:]) - 1)}($fp)"
         symbol = self._symbol(operand)
-        base = "$gp" if symbol.storage == "global" else "$fp"
-        return f"{symbol.offset}({base})"
+        if symbol.storage == "global":
+            return f"{symbol.offset}($gp)"
+        hops = self._hops(symbol)
+        if hops:
+            # variable de una funcion externa: se sigue la cadena de enlaces de acceso
+            return f"{symbol.offset}({self._load_link(hops)})"
+        return f"{symbol.offset}($fp)"
 
-    def _is_global(self, operand: str) -> bool:
-        return not is_temp(operand) and operand != "this" and self._symbol(operand).storage == "global"
+    def _is_shared(self, operand: str) -> bool:
+        """Valor que una llamada puede modificar: globales, variables de una funcion
+        externa y locales capturadas por una funcion anidada. No se conservan en un
+        registro a traves de una llamada."""
+        if is_temp(operand) or operand == "this":
+            return False
+        symbol = self._symbol(operand)
+        return symbol.storage == "global" or id(symbol) in self.captured or self._hops(symbol) > 0
 
     def _type(self, operand: str):
         if is_temp(operand):
@@ -501,12 +582,28 @@ class MIPSGenerator:
             raise CodeGenError(f"llamada a '{quad.arg1}', que no es una funcion conocida")
 
         self.alloc.before_call()
+        pushed = int(quad.arg2)
+        if target is None and self._has_link(quad.arg1):
+            self._push_link(quad.arg1)
+            pushed += 1
         self._emit("jalr  $v1" if target is not None else f"jal   {function_label(quad.arg1)}")
-        if int(quad.arg2):
-            self._emit(f"addiu $sp, $sp, {4 * int(quad.arg2)}")
+        if pushed:
+            self._emit(f"addiu $sp, $sp, {4 * pushed}")
         if quad.result is not None:
             dst = self._write(quad.result, return_type)
             self._emit(f"mov.s {dst}, $f0" if isinstance(return_type, FloatType) else f"move  {dst}, $v0")
+
+    def _push_link(self, callee: str):
+        """Apila el enlace de acceso de `callee`: el $fp del marco de la funcion que lo contiene.
+
+        Si el llamador es esa funcion, es su propio $fp. Si no (recursion, llamada
+        a una funcion hermana o desde mas adentro), se sube por la cadena de
+        enlaces la diferencia de profundidades + 1.
+        """
+        hops = self._depth(self.label) - self._depth(callee) + 1
+        link = self._load_link(hops) if hops > 0 else "$fp"
+        self._emit("addiu $sp, $sp, -4")
+        self._emit(f"sw    {link}, 0($sp)   # enlace de acceso de {callee}")
 
     # --- objetos ----------------------------------------------------------
 

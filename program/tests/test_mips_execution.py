@@ -231,6 +231,124 @@ def test_function_with_more_local_variables_than_saved_registers():
 
 # --- clases y objetos -------------------------------------------------------------
 
+# --- funciones anidadas (closures con enlace de acceso) -------------------------
+
+def test_nested_function_reads_and_writes_outer_variable():
+    assert output_of("""
+        function counter(start: integer): integer {
+          let count: integer = start;
+          function step(by: integer): integer {
+            count = count + by;
+            return count;
+          }
+          print(step(1));
+          print(step(10));
+          return count;
+        }
+        print(counter(5));
+    """) == ["6", "16", "16"]
+
+
+def test_two_and_three_levels_of_nesting():
+    assert output_of("""
+        function a(x: integer): integer {
+          let ax: integer = x * 10;
+          function b(y: integer): integer {
+            let by: integer = y + 1;
+            function c(z: integer): integer {
+              ax = ax + 1;
+              return ax + by + z + x;
+            }
+            return c(100);
+          }
+          let r: integer = b(2);
+          print(ax);
+          return r;
+        }
+        print(a(3));
+    """) == ["31", "137"]
+
+
+def test_recursion_inside_a_nested_function():
+    assert output_of("""
+        function sumTo(limit: integer): integer {
+          let calls: integer = 0;
+          function go(n: integer): integer {
+            calls = calls + 1;
+            if (n == 0) { return 0; }
+            return n + go(n - 1);
+          }
+          let total: integer = go(limit);
+          print(calls);
+          return total;
+        }
+        print(sumTo(10));
+    """) == ["11", "55"]
+
+
+def test_sibling_nested_functions_share_the_outer_frame():
+    assert output_of("""
+        function outer(): integer {
+          let v: integer = 0;
+          function inc() { v = v + 1; }
+          function twice() { inc(); inc(); }
+          twice();
+          twice();
+          inc();
+          return v;
+        }
+        print(outer());
+    """) == ["5"]
+
+
+def test_closure_over_floats_strings_and_arrays_inside_loops():
+    assert output_of("""
+        function run(): string {
+          let total: float = 0.5;
+          let text: string = "a";
+          let xs: integer[] = [1, 2, 3];
+          function visit(i: integer) {
+            total = total + xs[i];
+            text = text + "b";
+            xs[i] = xs[i] * 2;
+          }
+          for (let i: integer = 0; i < 3; i = i + 1) { visit(i); }
+          print(total);
+          print(xs[2]);
+          return text;
+        }
+        print(run());
+    """) == ["6.5", "6", "abbb"]
+
+
+def test_inner_variable_shadowing_an_outer_one():
+    assert output_of("""
+        function outer(): integer {
+          let x: integer = 1;
+          function inner(): integer {
+            let before: integer = x;
+            if (true) { let x: integer = 100; print(x); }
+            return before + x;
+          }
+          return inner();
+        }
+        print(outer());
+    """) == ["100", "2"]
+
+
+def test_error_in_nested_function_caught_by_outer_try():
+    assert output_of("""
+        function outer(): integer {
+          let xs: integer[] = [7];
+          let status: integer = 0;
+          function get(i: integer): integer { status = 1; return xs[i]; }
+          try { print(get(0)); print(get(5)); } catch (e) { print(e); status = status + 10; }
+          return status;
+        }
+        print(outer());
+    """) == ["7", "indice fuera de rango", "11"]
+
+
 def test_objects_fields_constructor_and_virtual_dispatch():
     assert output_of("""
         class Animal {
