@@ -59,6 +59,27 @@ class FunctionSymbol(Symbol):
     def param_types(self):
         return self.type.param_types
 
+    @property
+    def enclosing_function(self) -> "FunctionSymbol":
+        """Funcion en cuyo cuerpo se declaro esta (None si es de nivel superior o un metodo).
+
+        Se obtiene de la cadena de scopes: el scope FUNCTION mas cercano por
+        encima del scope propio de la funcion.
+        """
+        scope = self.scope.parent if self.scope is not None else None
+        while scope is not None:
+            if scope.kind == ScopeKind.FUNCTION:
+                return scope.owner
+            scope = scope.parent
+        return None
+
+    @property
+    def nesting_depth(self) -> int:
+        """Profundidad de anidamiento: 0 para funciones de nivel superior y metodos,
+        1 para una funcion declarada dentro de otra, etc."""
+        outer = self.enclosing_function
+        return 0 if outer is None else outer.nesting_depth + 1
+
 
 class ClassSymbol(Symbol):
     def __init__(self, name: str, superclass: "ClassSymbol" = None):

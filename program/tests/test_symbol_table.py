@@ -149,3 +149,34 @@ def test_class_symbol_duplicate_field_and_method_names_raise():
 
     with pytest.raises(DuplicateSymbolError):
         clase.define_method(FunctionSymbol("x", [], VOID))
+
+
+def test_nesting_depth_of_functions_comes_from_the_scope_chain():
+    table = SymbolTable()
+    outer = FunctionSymbol("outer", [], INTEGER)
+    table.define(outer)
+    outer.scope = table.enter_scope(ScopeKind.FUNCTION, owner=outer)
+    table.enter_scope(ScopeKind.BLOCK)  # un bloque intermedio no cuenta
+    inner = FunctionSymbol("inner", [], INTEGER)
+    table.define(inner)
+    inner.scope = table.enter_scope(ScopeKind.FUNCTION, owner=inner)
+    innermost = FunctionSymbol("innermost", [], INTEGER)
+    table.define(innermost)
+    innermost.scope = table.enter_scope(ScopeKind.FUNCTION, owner=innermost)
+
+    assert outer.enclosing_function is None and outer.nesting_depth == 0
+    assert inner.enclosing_function is outer and inner.nesting_depth == 1
+    assert innermost.enclosing_function is inner and innermost.nesting_depth == 2
+
+
+def test_method_has_no_enclosing_function():
+    table = SymbolTable()
+    cls = ClassSymbol("A")
+    table.define(cls)
+    cls.scope = table.enter_scope(ScopeKind.CLASS, owner=cls)
+    method = FunctionSymbol("m", [], VOID)
+    cls.define_method(method)
+    method.scope = table.enter_scope(ScopeKind.FUNCTION, owner=method)
+
+    assert method.enclosing_function is None
+    assert method.nesting_depth == 0
