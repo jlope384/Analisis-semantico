@@ -15,6 +15,73 @@ y [ARCHITECTURE.md](ARCHITECTURE.md) para el detalle de la arquitectura,
 [CODEGEN.md](CODEGEN.md) para la generación de MIPS (memoria, secuencia de
 llamada, asignación de registros con `getReg` y runtime).
 
+## Cómo ejecutar
+
+Todo corre dentro de Docker (Java, ANTLR, Python y el simulador MARS ya
+vienen en la imagen). Los comandos se ejecutan desde la raíz del repo.
+
+**1. Construir la imagen y generar el parser** (una sola vez):
+
+```bash
+docker build --rm . -t csp-image
+docker run --rm -v "$(pwd)/program":/program csp-image antlr -Dlanguage=Python3 Compiscript.g4
+```
+
+**2. Revisar un programa** (errores léxicos, sintácticos y semánticos):
+
+```bash
+docker run --rm -v "$(pwd)/program":/program csp-image python3 Driver.py examples/04_closures.cps
+```
+
+**3. Ver el código intermedio (TAC)** y la tabla de símbolos con direcciones:
+
+```bash
+docker run --rm -v "$(pwd)/program":/program csp-image python3 Driver.py examples/04_closures.cps --tac
+docker run --rm -v "$(pwd)/program":/program csp-image python3 Driver.py examples/04_closures.cps --tac salida.tac --symbols
+```
+
+**4. Generar el ensamblador MIPS** (`--mips`):
+
+```bash
+docker run --rm -v "$(pwd)/program":/program csp-image python3 Driver.py examples/04_closures.cps --mips closures.asm
+```
+
+**5. Ejecutarlo en MARS** (modo consola):
+
+```bash
+docker run --rm -v "$(pwd)/program":/program csp-image mars closures.asm
+```
+
+Un error en tiempo de ejecución que nadie atrapa imprime
+`Error en tiempo de ejecucion: <mensaje>` y termina con código de salida 1.
+El `.asm` también se puede abrir en la interfaz gráfica de MARS
+(https://github.com/dpetersanderson/MARS/releases): *Assemble* → *Run*.
+
+Si el programa tiene errores, `Driver.py` los imprime, termina con código 1
+y no genera ni el TAC ni el `.asm`.
+
+**6. Correr la batería de tests** (incluye los que ejecutan el MIPS en MARS
+y los ejemplos de `program/examples/`):
+
+```bash
+docker run --rm -v "$(pwd)/program":/program csp-image pytest
+```
+
+**Ejemplos.** `program/examples/` tiene programas representativos (`.cps`)
+con su salida esperada (`.out`): expresiones, control de flujo, recursión,
+closures, clases y herencia, arreglos, excepciones y un error no atrapado.
+`tests/test_examples.py` compila cada uno, lo ejecuta en MARS y compara la
+salida. Para agregar uno basta con poner el par `nombre.cps` / `nombre.out`.
+
+**7. Desde VS Code.** Con la extensión instalada (ver
+[Extensión de VS Code](#extensión-de-vs-code-editor)), abre un `.cps` y usa
+la paleta de comandos (`Cmd+Shift+P` / `Ctrl+Shift+P`):
+
+- **Compiscript: Compilar y mostrar codigo intermedio (TAC)**
+- **Compiscript: Compilar a MIPS (.asm)**: guarda el `.asm` junto al `.cps`
+- **Compiscript: Compilar y ejecutar en MARS**: además lo ejecuta en una
+  terminal, por defecto con `docker run ... csp-image mars`
+
 ## Estructura del repositorio
 
 ```
@@ -32,6 +99,7 @@ program/
   lsp_server.py           Servidor LSP (pygls) que expone el analizador a un editor
   tree_export.py          Arbol de ANTLR -> dict JSON / grafo Graphviz DOT
   program.cps            Programa de ejemplo usado para pruebas manuales
+  examples/               Programas .cps de ejemplo con su salida esperada (.out)
   semantic/               Paquete Python con la tabla de simbolos y el sistema de tipos
   tests/                  Bateria de tests (casos exitosos y fallidos por regla semantica)
   requirements.txt        Dependencias de Python para correr el servidor LSP en el host
@@ -204,3 +272,14 @@ reinicia el proceso del servidor sin cerrar VS Code.
 - [x] `--tac` y `--symbols` en `Driver.py`.
 - [x] Tests del TAC (`tests/test_tac*.py`, `tests/test_memory_layout.py`, `tests/test_compiler.py`).
 - [x] Comando **"Compiscript: Compilar y mostrar codigo intermedio (TAC)"** en la extensión de VS Code.
+
+### Fase de generación de código MIPS
+
+- [x] Bloques básicos, análisis de vida y siguiente uso (`codegen/liveness.py`).
+- [x] Asignación de registros con `getReg`, descriptores y spill (`codegen/registers.py`).
+- [x] Traducción TAC → MIPS: secuencia de llamada, objetos y vtables, arreglos,
+      strings, floats, try/catch y errores en tiempo de ejecución.
+- [x] Funciones anidadas (closures) con enlace de acceso.
+- [x] `--mips` en `Driver.py`, ejecución en MARS y comandos en VS Code.
+- [x] Tests: generación, ejecución en MARS, casos fallidos y ejemplos
+      (`tests/test_mips_*.py`, `tests/test_examples.py`).
